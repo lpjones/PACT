@@ -47,9 +47,9 @@ static int mmap_filter(void *addr, size_t length, int prot, int flags, int fd, o
     //   return 1;
     // }
 
-    *result = (uint64_t)tmem_mmap(addr, length, prot, flags, fd, offset);
+    *result = (uint64_t)pact_mmap(addr, length, prot, flags, fd, offset);
     if (*result == (uint64_t)MAP_FAILED) {
-      LOG_DEBUG("tmem mmap failed for %p, length: %lu\n", addr, length);
+      LOG_DEBUG("pact mmap failed for %p, length: %lu\n", addr, length);
       return 1;
     }
     return 0;
@@ -69,11 +69,11 @@ static int munmap_filter(void *addr, size_t length, uint64_t* result)
 //     LOG("hemem munmap failed\n\tmunmap(0x%lx, %ld)\n", (uint64_t)addr, length);
 //   }
 // printf("Get hooked fool\n");
-    LOG_DEBUG("MUNMAP: tmem_munmap(%p, %lu)\n", addr, length);
+    LOG_DEBUG("MUNMAP: pact_munmap(%p, %lu)\n", addr, length);
 
-    *result = tmem_munmap(addr, length);
+    *result = pact_munmap(addr, length);
     if (*result == -1) {
-      LOG_DEBUG("tmem_munmap failed\n");
+      LOG_DEBUG("pact_munmap failed\n");
     }
     return 1;
 }
@@ -83,7 +83,7 @@ static void* bind_symbol(const char *sym)
 {
     void *ptr;
     if ((ptr = dlsym(RTLD_NEXT, sym)) == NULL) {
-      fprintf(stderr, "tmem memory manager interpose: dlsym failed (%s)\n", sym);
+      fprintf(stderr, "pact memory manager interpose: dlsym failed (%s)\n", sym);
       abort();
     }
     return ptr;
@@ -123,8 +123,8 @@ static __attribute__((constructor)) void init(void)
     LOG_DEBUG("pebs_init\n");
     pebs_init();
 
-    LOG_DEBUG("tmem_init\n");
-    tmem_init();
+    LOG_DEBUG("pact_init\n");
+    pact_init();
     internal_call = false;
 
 //   int ret = mallopt(M_MMAP_THRESHOLD, 0);
@@ -134,9 +134,9 @@ static __attribute__((constructor)) void init(void)
 //   assert(ret == 1);
 }
 
-// static __attribute__((destructor)) void tmem_shutdown(void)
+// static __attribute__((destructor)) void pact_shutdown(void)
 // {   
 //     LOG_DEBUG("DESTRUCTOR\n");
-//     tmem_cleanup();
+//     pact_cleanup();
 //     // pebs_cleanup();
 // }

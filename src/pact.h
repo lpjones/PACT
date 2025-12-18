@@ -1,5 +1,5 @@
-#ifndef _TMEM_HEADER
-#define _TMEM_HEADER
+#ifndef _pact_HEADER
+#define _pact_HEADER
 
 #include <stdio.h>
 #include <numa.h>
@@ -57,15 +57,15 @@ enum {
 #define MAX_NEIGHBORS 4
 #endif
 
-struct tmem_page;
+struct pact_page;
 
 struct neighbor_page {
-    struct tmem_page *page;
+    struct pact_page *page;
     double distance;
     uint64_t time_diff;
 };
 
-struct tmem_page {
+struct pact_page {
     uint64_t va;
     void* va_start;
     uint64_t size;
@@ -78,7 +78,7 @@ struct tmem_page {
     pthread_mutex_t page_lock;
 
     UT_hash_handle hh;
-    struct tmem_page *next, *prev;
+    struct pact_page *next, *prev;
     struct neighbor_page neighbors[MAX_NEIGHBORS];
     struct fifo_list *list;
 
@@ -90,11 +90,11 @@ struct tmem_page {
     _Atomic bool migrated;
 };
 
-void tmem_init();
-void* tmem_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
-int tmem_munmap(void *addr, size_t length);
-void tmem_cleanup();
-struct tmem_page* find_page(uint64_t va);
-struct tmem_page* find_page_no_lock(uint64_t va);
+void pact_init();
+void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
+int pact_munmap(void *addr, size_t length);
+void pact_cleanup();
+struct pact_page* find_page(uint64_t va);
+struct pact_page* find_page_no_lock(uint64_t va);
 
 #endif

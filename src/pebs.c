@@ -11,7 +11,7 @@
 static int pfd[PEBS_NPROCS][NPBUFTYPES];
 static struct perf_event_mmap_page *perf_page[PEBS_NPROCS][NPBUFTYPES];
 static uint64_t no_samples[PEBS_NPROCS][NPBUFTYPES];
-static FILE* tmem_trace_fp = NULL;
+static FILE* pact_trace_fp = NULL;
 static _Atomic bool kill_internal_threads[NUM_INTERNAL_THREADS];
 static pthread_t internal_threads[NUM_INTERNAL_THREADS];
 
@@ -115,7 +115,7 @@ void* pebs_stats_thread() {
 
     while (!killed(PEBS_STATS_THREAD)) {
         sleep(1);
-        LOG_STATS("internal_mem_overhead: [%lu]\tmem_allocated: [%lu]\tthrottles: [%lu]\tunthrottles: [%lu]\tunknown_samples: [%lu]\n", 
+        LOG_STATS("internal_mem_overhead: [%lu]\tpact_allocated: [%lu]\tthrottles: [%lu]\tunthrottles: [%lu]\tunknown_samples: [%lu]\n", 
                 pebs_stats.internal_mem_overhead, pebs_stats.mem_allocated, pebs_stats.throttles, pebs_stats.unthrottles, pebs_stats.unknown_samples)
         LOG_STATS("\twrapped_records: [%lu]\twrapped_headers: [%lu]\n", 
                 pebs_stats.wrapped_records, pebs_stats.wrapped_headers);
@@ -169,7 +169,7 @@ static void start_pebs_stats_thread() {
 }
 
 // Could be munmapped at any time
-void make_hot_request(struct tmem_page* page) {
+void make_hot_request(struct pact_page* page) {
     if (page == NULL) return;
     // page could be munmapped here (but pages are never actually
     // unmapped so just check if it's in free state once locked)
@@ -219,7 +219,7 @@ void make_hot_request(struct tmem_page* page) {
 
 }
 
-void make_cold_request(struct tmem_page* page) {
+void make_cold_request(struct pact_page* page) {
     if (page == NULL) return;
     // page could be munmapped here (but pages are never actually
     // unmapped so just check if it's in free state once locked)
@@ -310,12 +310,12 @@ void process_perf_buffer(int cpu_idx, int evt) {
         }
         p->data_tail += hdr->size;
  
-        /* Have PEBS Sample, Now check with tmem */
+        /* Have PEBS Sample, Now check with pact */
         // continue;
         if (rec.addr == 0) continue;
 
         uint64_t addr_aligned = rec.addr & PAGE_MASK;
-        struct tmem_page *page = find_page_no_lock(addr_aligned);
+        struct pact_page *page = find_page_no_lock(addr_aligned);
 
         // Try 4KB aligned page if not 2MB aligned page
         if (page == NULL)
@@ -329,7 +329,7 @@ void process_perf_buffer(int cpu_idx, int evt) {
             .cpu = cpu_idx,
             .evt = evt
         };
-        fwrite(&p_rec, sizeof(struct pebs_rec), 1, tmem_trace_fp);
+        fwrite(&p_rec, sizeof(struct pebs_rec), 1, pact_trace_fp);
 #endif
 
         // if (page->migrated) {
@@ -397,7 +397,7 @@ void process_perf_buffer(int cpu_idx, int evt) {
         algo_add_page(page);
         
         if (cold_list.numentries != 0) {
-            struct tmem_page *pred_pages[MAX_NEIGHBORS * MAX_PRED_DEPTH];
+            struct pact_page *pred_pages[MAX_NEIGHBORS * MAX_PRED_DEPTH];
             uint32_t idx = 0;
             algo_predict_pages(page, pred_pages, &idx);
 
@@ -476,7 +476,7 @@ void* pebs_scan_thread() {
     return NULL;
 }
 
-void tmem_migrate_page(struct tmem_page *page, int node) {
+void pact_migrate_page(struct pact_page *page, int node) {
     unsigned long nodemask = 1UL << node;
 
     if (mbind(page->va_start, page->size, MPOL_BIND, &nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
@@ -531,7 +531,7 @@ void *migrate_thread() {
     assert(s == 0);
     // uint64_t num_loops = 0;
 
-    struct tmem_page *hot_page, *cold_page;
+    struct pact_page *hot_page, *cold_page;
     uint64_t cold_bytes = 0;
 
     while (true) {
@@ -562,8 +562,8 @@ void *migrate_thread() {
         if (bytes_free >= hot_page->size) {
             LOG_DEBUG("MIG: enough dram: 0x%lx\n", hot_page->va);
             // Enough space in dram, just migrate hot page
-            // tmem_migrate_pages(&hot_page, 1, DRAM_NODE);
-            tmem_migrate_page(hot_page, DRAM_NODE);
+            // pact_migrate_pages(&hot_page, 1, DRAM_NODE);
+            pact_migrate_page(hot_page, DRAM_NODE);
             hot_page->migrated = true;
             pebs_stats.promotions++;
             
@@ -608,8 +608,8 @@ void *migrate_thread() {
             // assert(!cold_page->hot);
             assert(cold_page->list == NULL);
 
-            // tmem_migrate_pages(&cold_page, 1, REM_NODE);
-            tmem_migrate_page(cold_page, REM_NODE);
+            // pact_migrate_pages(&cold_page, 1, REM_NODE);
+            pact_migrate_page(cold_page, REM_NODE);
             cold_page->migrated = true;
             cold_bytes += cold_page->size;
             LOG_DEBUG("MIG: demoted 0x%lx\n", cold_page->va);
@@ -619,8 +619,8 @@ void *migrate_thread() {
         if (cold_page == NULL) continue;
         // now enough space in dram
         LOG_DEBUG("MIG: now enough space: 0x%lx\n", hot_page->va);
-        // tmem_migrate_pages(&hot_page, 1, DRAM_NODE);
-        tmem_migrate_page(hot_page, DRAM_NODE);
+        // pact_migrate_pages(&hot_page, 1, DRAM_NODE);
+        pact_migrate_page(hot_page, DRAM_NODE);
         hot_page->migrated = true;
         pebs_stats.promotions++;
 
@@ -658,11 +658,11 @@ void pebs_init(void) {
     start_pebs_stats_thread();
 #endif
 
-    tmem_trace_fp = fopen("tmem_trace.bin", "wb");
-    if (tmem_trace_fp == NULL) {
-        perror("tmem_trace file fopen");
+    pact_trace_fp = fopen("pact_trace.bin", "wb");
+    if (pact_trace_fp == NULL) {
+        perror("pact_trace file fopen");
     }
-    assert(tmem_trace_fp != NULL);
+    assert(pact_trace_fp != NULL);
 
     int pebs_start_cpu = 0;
     int num_cores = PEBS_NPROCS;

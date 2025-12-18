@@ -13,7 +13,7 @@
 #include <malloc.h>
 #include <numa.h>
 
-#include "tmem.h"
+#include "pact.h"
 #include "pebs.h"
 
 extern _Thread_local bool internal_call;

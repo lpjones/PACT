@@ -1,10 +1,10 @@
 #include <pthread.h>
 #include <stdlib.h>
 
-#include "tmem.h"
+#include "pact.h"
 #include "fifo.h"
 
-void enqueue_fifo(struct fifo_list *queue, struct tmem_page *entry)
+void enqueue_fifo(struct fifo_list *queue, struct pact_page *entry)
 {
   // if (queue == &hot_list) {
   //   LOG_DEBUG("enqueue_fifo(hot, %p) %lu\n", entry, queue->numentries);
@@ -38,7 +38,7 @@ void enqueue_fifo(struct fifo_list *queue, struct tmem_page *entry)
   pthread_mutex_unlock(&(queue->list_lock));
 }
 
-struct tmem_page *dequeue_fifo(struct fifo_list *queue)
+struct pact_page *dequeue_fifo(struct fifo_list *queue)
 {
   // Check atomic numentries first to not lock every time for empty queue
   if (__atomic_load_n(&queue->numentries, __ATOMIC_ACQUIRE) == 0) {
@@ -57,7 +57,7 @@ struct tmem_page *dequeue_fifo(struct fifo_list *queue)
   //   LOG_DEBUG(" dequeue_fifo(%p, ", queue);
   
   pthread_mutex_lock(&(queue->list_lock));
-  struct tmem_page *ret = queue->last;
+  struct pact_page *ret = queue->last;
 
   // pthread_mutex_lock(&ret->page_lock);
   if (ret == NULL || ret->list != queue) {
@@ -86,7 +86,7 @@ struct tmem_page *dequeue_fifo(struct fifo_list *queue)
   return ret;
 }
 
-void page_list_remove_page(struct fifo_list *list, struct tmem_page *page)
+void page_list_remove_page(struct fifo_list *list, struct pact_page *page)
 {
   // if (list == &hot_list) {
   //   LOG_DEBUG("  page_list_remove_page(hot, %p) %lu\n", page, list->numentries);
@@ -139,7 +139,7 @@ void page_list_remove_page(struct fifo_list *list, struct tmem_page *page)
   pthread_mutex_unlock(&(list->list_lock));
 }
 
-void next_page(struct fifo_list *list, struct tmem_page *page, struct tmem_page **next_page)
+void next_page(struct fifo_list *list, struct pact_page *page, struct pact_page **next_page)
 {   
     if (__atomic_load_n(&list->numentries, __ATOMIC_ACQUIRE) == 0) {
       *next_page = NULL;

@@ -1,6 +1,6 @@
-#include "tmem.h"
+#include "pact.h"
 
-struct tmem_page *pages = NULL;
+struct pact_page *pages = NULL;
 struct fifo_list hot_list;
 struct fifo_list cold_list;
 struct fifo_list free_list;
@@ -12,17 +12,17 @@ long dram_size = 0;
 long dram_used = 0;
 long rem_used = 0;
 
-static uint64_t max_tmem_va = 0;
-static uint64_t min_tmem_va = UINT64_MAX;
+static uint64_t max_pact_va = 0;
+static uint64_t min_pact_va = UINT64_MAX;
 
 _Atomic bool dram_lock = false;
 
 // If the allocations are smaller than the PAGE_SIZE it's possible to 
-void add_page(struct tmem_page *page) {
-    struct tmem_page *p;
+void add_page(struct pact_page *page) {
+    struct pact_page *p;
     pthread_mutex_lock(&pages_lock);
 
-    // struct tmem_page *cur_page, *tmp;
+    // struct pact_page *cur_page, *tmp;
     // LOG_DEBUG("pages: ");
     // HASH_ITER(hh, pages, cur_page, tmp) {
     //     LOG_DEBUG("0x%lx, ", cur_page->va);
@@ -41,15 +41,15 @@ void add_page(struct tmem_page *page) {
     pthread_mutex_unlock(&pages_lock);
 }
 
-void remove_page(struct tmem_page *page)
+void remove_page(struct pact_page *page)
 {
   pthread_mutex_lock(&pages_lock);
   HASH_DEL(pages, page);
   pthread_mutex_unlock(&pages_lock);
 }
 
-struct tmem_page* find_page_no_lock(uint64_t va) {
-    struct tmem_page *page;
+struct pact_page* find_page_no_lock(uint64_t va) {
+    struct pact_page *page;
     if (pthread_mutex_trylock(&pages_lock) != 0) {
         return NULL;    // Abort early so no waiting
     }
@@ -58,16 +58,16 @@ struct tmem_page* find_page_no_lock(uint64_t va) {
     return page;
 }
 
-struct tmem_page* find_page(uint64_t va)
+struct pact_page* find_page(uint64_t va)
 {
-  struct tmem_page *page;
+  struct pact_page *page;
   pthread_mutex_lock(&pages_lock);
   HASH_FIND(hh, pages, &va, sizeof(uint64_t), page);
   pthread_mutex_unlock(&pages_lock);
   return page;
 }
 
-void tmem_init() {
+void pact_init() {
     internal_call = true;
 #if (DRAM_BUFFER != 0 && DRAM_SIZE != 0) || (DRAM_BUFFER == 0 && DRAM_SIZE == 0)
     fprintf(stderr, "Can't have both DRAM_BUFFER and DRAM_SIZE\n");
@@ -80,9 +80,9 @@ void tmem_init() {
 
     // LOG_DEBUG("DRAM size: %lu, REMOTE size: %lu\n", DRAM_SIZE, REMOTE_SIZE);
 
-    LOG_DEBUG("finished tmem_init\n");
+    LOG_DEBUG("finished pact_init\n");
 
-    struct tmem_page *dummy_page = calloc(1, sizeof(struct tmem_page));
+    struct pact_page *dummy_page = calloc(1, sizeof(struct pact_page));
     add_page(dummy_page);
 
     // check how much free space on dram
@@ -102,7 +102,7 @@ void tmem_init() {
 #define PAGE_ROUND_UP_BASE(x) (((x) + (BASE_PAGE_SIZE)-1) & (~((BASE_PAGE_SIZE)-1)))
 
 
-void* tmem_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
+void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
     length = PAGE_ROUND_UP_BASE(length);
     internal_call = true;
 
@@ -124,7 +124,7 @@ void* tmem_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         LOG_DEBUG("MMAP: All DRAM\n");
 
 
-        if (mbind(p, length, MPOL_BIND, &dram_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT)) {
+        if (mbind(p, length, MPOL_PREFERRED, &dram_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT)) {
             perror("mbind");
             assert(0);
         }
@@ -135,7 +135,7 @@ void* tmem_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         pthread_mutex_unlock(&mmap_lock);
         LOG_DEBUG("MMAP: All Remote\n");
         // dram full, all on remote
-        if (mbind(p, length, MPOL_BIND, &rem_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT)) {
+        if (mbind(p, length, MPOL_PREFERRED, &rem_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT)) {
             perror("mbind");
             assert(0);
         }
@@ -153,11 +153,11 @@ void* tmem_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         LOG_DEBUG("MMAP: dram: %lu, remote: %lu\n", dram_mmap_size, rem_mmap_size);
         p_dram = p;
         p_rem = p_dram + dram_mmap_size;
-        if (mbind(p_dram, dram_mmap_size, MPOL_BIND, &dram_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
+        if (mbind(p_dram, dram_mmap_size, MPOL_PREFERRED, &dram_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
             perror("mbind");
             assert(0);
         }
-        if (mbind(p_rem, rem_mmap_size, MPOL_BIND, &rem_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
+        if (mbind(p_rem, rem_mmap_size, MPOL_PREFERRED, &rem_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
             perror("mbind");
             assert(0);
         }
@@ -175,12 +175,12 @@ void* tmem_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
 
     assert((uint64_t)p % BASE_PAGE_SIZE == 0);
 
-    // recycle pages from free_tmem_pages
-    uint64_t num_tmem_pages_needed = (length + PAGE_SIZE - 1) / PAGE_SIZE;
+    // recycle pages from free_pact_pages
+    uint64_t num_pact_pages_needed = (length + PAGE_SIZE - 1) / PAGE_SIZE;
     uint64_t i = 0;
-    for (i = 0; free_list.numentries > 0 && num_tmem_pages_needed > 0; i++) {
+    for (i = 0; free_list.numentries > 0 && num_pact_pages_needed > 0; i++) {
         // printf("recycling pages\n");
-        struct tmem_page *page = dequeue_fifo(&free_list);
+        struct pact_page *page = dequeue_fifo(&free_list);
         if (page == NULL) break;
         pthread_mutex_lock(&page->page_lock);
 
@@ -196,8 +196,8 @@ void* tmem_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
             // Align va to PAGE_SIZE address for future lookups in hashmap
             page->va = PAGE_ROUND_UP((uint64_t)(page->va_start));
         }
-        if (page->va > max_tmem_va) max_tmem_va = page->va;
-        if (page->va < min_tmem_va) min_tmem_va = page->va;
+        if (page->va > max_pact_va) max_pact_va = page->va;
+        if (page->va < min_pact_va) min_pact_va = page->va;
         page->mig_up = 0;
         page->mig_down = 0;
         page->accesses = 0;
@@ -228,22 +228,22 @@ void* tmem_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
 
         // LOG_DEBUG("adding recycled page: 0x%lx\n", (uint64_t)page);
         add_page(page);
-        num_tmem_pages_needed--;
+        num_pact_pages_needed--;
     }
 
-    if (num_tmem_pages_needed == 0) {
+    if (num_pact_pages_needed == 0) {
         internal_call = false; 
         return p;
     }
 
-    uint64_t pages_mmap_size = num_tmem_pages_needed * sizeof(struct tmem_page);
+    uint64_t pages_mmap_size = num_pact_pages_needed * sizeof(struct pact_page);
     void *pages_ptr = libc_mmap(NULL, pages_mmap_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
     assert(pages_ptr != MAP_FAILED);
     pebs_stats.internal_mem_overhead += pages_mmap_size;
     
-    for (uint64_t j = 0; num_tmem_pages_needed > 0; j++) {
-        // struct tmem_page* page = create_tmem_page(page_boundry, pages_ptr);
-        struct tmem_page *page = (struct tmem_page *)(pages_ptr + (j * sizeof(struct tmem_page)));
+    for (uint64_t j = 0; num_pact_pages_needed > 0; j++) {
+        // struct pact_page* page = create_pact_page(page_boundry, pages_ptr);
+        struct pact_page *page = (struct pact_page *)(pages_ptr + (j * sizeof(struct pact_page)));
 
         // Don't need lock since first creation of page so no threads have cached data on it
         page->va_start = p + (i * PAGE_SIZE);
@@ -256,8 +256,8 @@ void* tmem_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
             // Align va to PAGE_SIZE address for future lookups in hashmap
             page->va = PAGE_ROUND_UP((uint64_t)(page->va_start));
         }
-        if (page->va > max_tmem_va) max_tmem_va = page->va;
-        if (page->va < min_tmem_va) min_tmem_va = page->va;
+        if (page->va > max_pact_va) max_pact_va = page->va;
+        if (page->va < min_pact_va) min_pact_va = page->va;
         page->mig_up = 0;
         page->mig_down = 0;
         page->accesses = 0;
@@ -283,20 +283,20 @@ void* tmem_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         
         // LOG_DEBUG("adding page: 0x%lx\n", (uint64_t)page);
         add_page(page);
-        num_tmem_pages_needed--;
+        num_pact_pages_needed--;
         i++;
     }
     internal_call = false;
     return p;
 }
 
-int tmem_munmap(void *addr, size_t length) {
+int pact_munmap(void *addr, size_t length) {
     internal_call = true;
-    LOG_DEBUG("tmem_munmap: %p, length: %lu\n", addr, length);
-    LOG_DEBUG("tmem va range: 0x%lx - 0x%lx\n", min_tmem_va, max_tmem_va);
+    LOG_DEBUG("pact_munmap: %p, length: %lu\n", addr, length);
+    LOG_DEBUG("pact va range: 0x%lx - 0x%lx\n", min_pact_va, max_pact_va);
 
-    uint64_t num_tmem_pages = (length + PAGE_SIZE - 1) / PAGE_SIZE;
-    for (uint64_t i = 0; i < num_tmem_pages; i++) {
+    uint64_t num_pact_pages = (length + PAGE_SIZE - 1) / PAGE_SIZE;
+    for (uint64_t i = 0; i < num_pact_pages; i++) {
         void *va_start = addr + (i * PAGE_SIZE);
         uint64_t va;
         if (length - (i * PAGE_SIZE) < PAGE_SIZE) {
@@ -304,7 +304,7 @@ int tmem_munmap(void *addr, size_t length) {
         } else {
             va = PAGE_ROUND_UP((uint64_t)(va_start));
         }
-        struct tmem_page *page = find_page(va);
+        struct pact_page *page = find_page(va);
         if (page != NULL) {
             pthread_mutex_lock(&page->page_lock);
             assert(page->free == false);
@@ -327,7 +327,7 @@ int tmem_munmap(void *addr, size_t length) {
     return 0;
 }
 
-void tmem_cleanup() {
+void pact_cleanup() {
     kill_threads();
     // TODO: unmap pages (very difficult since libc_munmap works on 4KB and will unmap multiple pages at a time if in same region)
     wait_for_threads();

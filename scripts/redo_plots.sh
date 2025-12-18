@@ -4,7 +4,7 @@
 #   ./run_test.sh              # runs the example at the bottom
 #   OR source this file and call run_app "myconfig" "<full command line>"
 
-PRELOAD="/proj/TppPlus/tpp/libnuma_pgmig/src/libtmem.so"
+PRELOAD="/proj/TppPlus/tpp/libnuma_pgmig/src/libpact.so"
 CGUPS_DIR="../workloads/cgups"
 MGUPS_DIR="../../scripts/my_gups"
 HGUPS_DIR="../workloads/hgups"
@@ -48,13 +48,13 @@ run_app() {
 #   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" -f "${app_dir}/stats.txt" -g1 "cold_pages" "hot_pages" -o "${app_dir}/pages"
 
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" \
-    "${app_dir}/tmem_trace.bin" \
+    "${app_dir}/pact_trace.bin" \
     --title "${title} Memory Trace" \
     --output "${out_dir}/${config}-trace.png" \
     -fast
   
   
-#   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" "${app_dir}/tmem_trace.bin" -fast -c cpu
+#   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" "${app_dir}/pact_trace.bin" -fast -c cpu
 
   return ${rc}
 }
@@ -189,7 +189,7 @@ run_trace() {
   echo "Memory Traces"
   # All Fast Mem
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" \
-    "${app_dir}/bc-local-${app}/tmem_trace.bin" \
+    "${app_dir}/bc-local-${app}/pact_trace.bin" \
     --title "BC All Fast Memory Trace" \
     --output "${app_dir}/bc-local-trace.png" \
     --start-percent 50 \
@@ -197,7 +197,7 @@ run_trace() {
     -fast
 
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" \
-    "${app_dir}/resnet-local-${app}/tmem_trace.bin" \
+    "${app_dir}/resnet-local-${app}/pact_trace.bin" \
     --title "ResNet50 All Fast Memory Trace" \
     --output "${app_dir}/resnet-local-trace.png" \
     --start-percent 0 \
@@ -205,7 +205,7 @@ run_trace() {
     -fast
 
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" \
-    "${app_dir}/cgups-local-${app}/tmem_trace.bin" \
+    "${app_dir}/cgups-local-${app}/pact_trace.bin" \
     --title "GUPS All Fast Memory Trace" \
     --output "${app_dir}/cgups-local-trace.png" \
     --start-percent 0 \
@@ -213,7 +213,7 @@ run_trace() {
     -fast
 
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" \
-    "${app_dir}/bfs-local-${app}/tmem_trace.bin" \
+    "${app_dir}/bfs-local-${app}/pact_trace.bin" \
     --title "BFS All Fast Memory Trace" \
     --output "${app_dir}/bfs-local-trace.png" \
     --start-percent 50 \
@@ -221,7 +221,7 @@ run_trace() {
     -fast
 
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" \
-    "${app_dir}/stream-local-${app}/tmem_trace.bin" \
+    "${app_dir}/stream-local-${app}/pact_trace.bin" \
     --title "Stream All Fast Memory Trace" \
     --output "${app_dir}/stream-local-trace.png" \
     --start-percent 50 \
@@ -230,7 +230,7 @@ run_trace() {
 
   # Resnet
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" \
-    "${app_dir}/resnet-PAGR-${app}/tmem_trace.bin" \
+    "${app_dir}/resnet-PAGR-${app}/pact_trace.bin" \
     --title "ResNet50 PAGR Memory Trace" \
     --output "${app_dir}/resnet-PAGR-${app}-trace.png" \
     --start-percent 0 \
@@ -238,7 +238,7 @@ run_trace() {
     -fast
 
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" \
-    "${app_dir}/resnet-hem-${app}/tmem_trace.bin" \
+    "${app_dir}/resnet-hem-${app}/pact_trace.bin" \
     --title "ResNet50 HeMem Memory Trace" \
     --output "${app_dir}/resnet-HeMem-${app}-trace.png" \
     --start-percent 0 \
@@ -247,7 +247,7 @@ run_trace() {
 
   # CGUPS
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" \
-    "${app_dir}/cgups-PAGR-${app}/tmem_trace.bin" \
+    "${app_dir}/cgups-PAGR-${app}/pact_trace.bin" \
     --title "GUPS PAGR Memory Trace" \
     --output "${app_dir}/cgups-PAGR-${app}-trace.png" \
     --start-percent 0 \
@@ -255,7 +255,7 @@ run_trace() {
     -fast
 
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" \
-    "${app_dir}/cgups-hem-${app}/tmem_trace.bin" \
+    "${app_dir}/cgups-hem-${app}/pact_trace.bin" \
     --title "GUPS HeMem Memory Trace" \
     --output "${app_dir}/cgups-hem-${app}-trace.png" \
     --start-percent 0 \
@@ -264,7 +264,7 @@ run_trace() {
 
   # BFS
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" \
-    "${app_dir}/bfs-PAGR-${app}/tmem_trace.bin" \
+    "${app_dir}/bfs-PAGR-${app}/pact_trace.bin" \
     --title "BFS PAGR Memory Trace" \
     --output "${app_dir}/bfs-PAGR-${app}-trace.png" \
     --start-percent 50 \
@@ -272,7 +272,7 @@ run_trace() {
     -fast
 
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" \
-    "${app_dir}/bfs-hem-${app}/tmem_trace.bin" \
+    "${app_dir}/bfs-hem-${app}/pact_trace.bin" \
     --title "BFS HeMem Memory Trace" \
     --output "${app_dir}/bfs-hem-${app}-trace.png" \
     --start-percent 50 \
@@ -281,7 +281,7 @@ run_trace() {
 
   # Stream
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" \
-    "${app_dir}/stream-PAGR-${app}/tmem_trace.bin" \
+    "${app_dir}/stream-PAGR-${app}/pact_trace.bin" \
     --title "Stream PAGR Memory Trace" \
     --output "${app_dir}/stream-PAGR-${app}-trace.png" \
     --start-percent 50 \
@@ -289,7 +289,7 @@ run_trace() {
     -fast
 
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" \
-    "${app_dir}/stream-hem-${app}/tmem_trace.bin" \
+    "${app_dir}/stream-hem-${app}/pact_trace.bin" \
     --title "Stream HeMem Memory Trace" \
     --output "${app_dir}/stream-hem-${app}-trace.png" \
     --start-percent 50 \
@@ -298,7 +298,7 @@ run_trace() {
 
   # BC
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" \
-    "${app_dir}/bc-PAGR-${app}/tmem_trace.bin" \
+    "${app_dir}/bc-PAGR-${app}/pact_trace.bin" \
     --title "BC PAGR Memory Trace" \
     --output "${app_dir}/bc-PAGR-${app}-trace.png" \
     --start-percent 50 \
@@ -306,7 +306,7 @@ run_trace() {
     -fast
 
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" \
-    "${app_dir}/bc-hem-${app}/tmem_trace.bin" \
+    "${app_dir}/bc-hem-${app}/pact_trace.bin" \
     --title "BC HeMem Memory Trace" \
     --output "${app_dir}/bc-hem-${app}-trace.png" \
     --start-percent 50 \

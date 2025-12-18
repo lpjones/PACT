@@ -2,14 +2,14 @@ Current best parameters: resnet-stats1-clust1-hem0-his8-pred16-down0.0001-up0.01
 
 
 Lists:
-There are 3 lists in tmem:
+There are 3 lists in pact:
 Hot list: pages added to the hot list try to be migrated from remote memory to dram. So at the time of adding pages to the hot list they should be in remote memory and not already be in the hot list.
 
 Cold list: pages added to the cold list are used to free up space in dram when a hot page is identified. So at the time of adding pages to the cold list they should be in dram and not already be in the cold list.
 
 Free list: pages added to the free list have been munmapped by the application. Instead of munmapping these pages they are kept alive and are recycled for future mmap calls. This reduces the amount of mmap and munmap syscalls for applications that do many mmap and munmap calls such as python resnet_train.py.
 
-In the tmem_page struct there is a 'list' field which indicates which list the page is currently in. This field can and often times is 'NULL' in these instances:
+In the pact_page struct there is a 'list' field which indicates which list the page is currently in. This field can and often times is 'NULL' in these instances:
 The page is in remote memory and is cold. (This is the most common case)
 The page has been dequeued by the migrate thread and is being processed. This is more complicated and these are the following ways it is dealt with:
     In the case of the hot page being dequeued there are two possible race conditions.

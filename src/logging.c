@@ -9,8 +9,6 @@ FILE* cold_fp = NULL;
 struct timespec log_start_time;
 
 void init_log_files() {
-    internal_call = true;
-
 #if PEBS_STATS == 1
     stats_fp = fopen("stats.txt", "w");
     assert(stats_fp != NULL);
@@ -32,7 +30,6 @@ void init_log_files() {
     cold_fp = fopen("cold.bin", "wb");
     assert(cold_fp != NULL);
 #endif
-    internal_call = false;
 
     // reference start time
     log_start_time = get_time();

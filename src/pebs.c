@@ -1,19 +1,16 @@
 #include "pebs.h"
 
-// #define CHECK_KILLED(thread) if (!(num_loops++ & 0xFFFF) && killed(thread)) return NULL;
-#define CHECK_KILLED(thread) 
-
 
 // Public variables
+struct pebs_stats pebs_stats = {0};
 
 
 // Private variables
 static int pfd[PEBS_NPROCS][NPBUFTYPES];
 static struct perf_event_mmap_page *perf_page[PEBS_NPROCS][NPBUFTYPES];
 static uint64_t no_samples[PEBS_NPROCS][NPBUFTYPES];
-static FILE* tmem_trace_fp = NULL;
-static _Atomic bool kill_internal_threads[NUM_INTERNAL_THREADS];
 static pthread_t internal_threads[NUM_INTERNAL_THREADS];
+static FILE* pact_trace_fp = NULL;
 
 static _Thread_local uint64_t last_cyc_cool;
 
@@ -29,37 +26,6 @@ struct perf_sample {
 // __u64 data_src;         /* if PERF_SAMPLE_DATA_SRC */
 };
 
-
-
-struct pebs_stats pebs_stats = {0};
-
-
-void wait_for_threads() {
-    for (int i = 0; i < NUM_INTERNAL_THREADS; i++) {
-        void *ret;
-        pthread_join(internal_threads[i], &ret);
-    }
-    LOG_DEBUG("Internal threads killed\n");
-}
-
-void pebs_cleanup() {
-    
-}
-
-static inline void kill_thread(uint8_t thread) {
-    atomic_store(&kill_internal_threads[thread], true);
-}
-
-void kill_threads() {
-    LOG_DEBUG("Killing threads\n");
-    for (int i = 0; i < NUM_INTERNAL_THREADS; i++) {
-        kill_thread(i);
-    }
-}
-
-static inline bool killed(uint8_t thread) {
-    return atomic_load(&kill_internal_threads[thread]);
-}
 
 static inline long perf_event_open(struct perf_event_attr *hw_event, pid_t pid, int cpu, int group_fd, unsigned long flags) {
     int ret;
@@ -92,7 +58,7 @@ static struct perf_event_mmap_page* perf_setup(__u64 config, __u64 config1, uint
 
     size_t mmap_size = sysconf(_SC_PAGESIZE) * PERF_PAGES;
     /* printf("mmap_size = %zu\n", mmap_size); */
-    struct perf_event_mmap_page *p = libc_mmap(NULL, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, pfd[cpu_idx][type], 0);
+    struct perf_event_mmap_page *p = mmap(NULL, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, pfd[cpu_idx][type], 0);
     LOG_DEBUG("PEBS: cpu: %u, type: %llu, buffer size: %lu\n", cpu_idx, type, mmap_size);
     pebs_stats.internal_mem_overhead += mmap_size;
 
@@ -104,7 +70,6 @@ static struct perf_event_mmap_page* perf_setup(__u64 config, __u64 config1, uint
 }
 
 void* pebs_stats_thread() {
-    internal_call = true;
 
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
@@ -113,19 +78,16 @@ void* pebs_stats_thread() {
     assert(s == 0);
 
 
-    while (!killed(PEBS_STATS_THREAD)) {
+    while (true) {
         sleep(1);
         LOG_STATS("internal_mem_overhead: [%lu]\tmem_allocated: [%lu]\tthrottles: [%lu]\tunthrottles: [%lu]\tunknown_samples: [%lu]\n", 
                 pebs_stats.internal_mem_overhead, pebs_stats.mem_allocated, pebs_stats.throttles, pebs_stats.unthrottles, pebs_stats.unknown_samples)
+
         LOG_STATS("\twrapped_records: [%lu]\twrapped_headers: [%lu]\n", 
                 pebs_stats.wrapped_records, pebs_stats.wrapped_headers);
 
-#if DRAM_BUFFER != 0
         LOG_STATS("\tdram_free: [%ld]\tdram_used: [%ld]\t dram_size: [%ld]\trem_used: [%ld]\n", dram_free, dram_used, dram_size, rem_used);
-#endif
-#if DRAM_SIZE != 0
-        LOG_STATS("\tdram_used: [%ld]\t dram_size: [%ld]\tnon_tracked_mem: [%lu]\n", dram_used, dram_size, pebs_stats.non_tracked_mem);
-#endif
+
         double percent_dram = 100.0 * pebs_stats.dram_accesses / (pebs_stats.dram_accesses + pebs_stats.rem_accesses);
         LOG_STATS("\tdram_accesses: [%ld]\trem_accesses: [%ld]\t percent_dram: [%.2f]\n", 
             pebs_stats.dram_accesses, pebs_stats.rem_accesses, percent_dram);
@@ -169,7 +131,7 @@ static void start_pebs_stats_thread() {
 }
 
 // Could be munmapped at any time
-void make_hot_request(struct tmem_page* page) {
+void make_hot_request(struct pact_page* page) {
     if (page == NULL) return;
     // page could be munmapped here (but pages are never actually
     // unmapped so just check if it's in free state once locked)
@@ -219,7 +181,7 @@ void make_hot_request(struct tmem_page* page) {
 
 }
 
-void make_cold_request(struct tmem_page* page) {
+void make_cold_request(struct pact_page* page) {
     if (page == NULL) return;
     // page could be munmapped here (but pages are never actually
     // unmapped so just check if it's in free state once locked)
@@ -310,26 +272,20 @@ void process_perf_buffer(int cpu_idx, int evt) {
         }
         p->data_tail += hdr->size;
  
-        /* Have PEBS Sample, Now check with tmem */
+        /* Have PEBS Sample, Now check with pact */
         // continue;
         if (rec.addr == 0) continue;
 
-        uint64_t addr_aligned = rec.addr & PAGE_MASK;
-        struct tmem_page *page = find_page_no_lock(addr_aligned);
-
-        // Try 4KB aligned page if not 2MB aligned page
-        if (page == NULL)
-            page = find_page_no_lock(rec.addr & BASE_PAGE_MASK);
-        if (page == NULL) continue;
+        struct pact_page *page = create_pact_page(rec.addr, evt == DRAMREAD);
 #if RECORD == 1
         struct pebs_rec p_rec = {
-            .va = addr_aligned,
+            .va = rec.addr,
             .ip = rec.ip,
             .cyc = rdtscp(),
             .cpu = cpu_idx,
             .evt = evt
         };
-        fwrite(&p_rec, sizeof(struct pebs_rec), 1, tmem_trace_fp);
+        fwrite(&p_rec, sizeof(struct pebs_rec), 1, pact_trace_fp);
 #endif
 
         // if (page->migrated) {
@@ -373,20 +329,20 @@ void process_perf_buffer(int cpu_idx, int evt) {
         }
 
         // Sample based cooling
-        // samples_since_cool++;
-        // if (samples_since_cool >= SAMPLE_COOLING_THRESHOLD) {
-        //     global_clock++;
-        //     samples_since_cool = 0;
-        //     // printf("cyc since last cool: %lu\n", cur_cyc - last_cyc_cool);
-        //     last_cyc_cool = rdtscp();
-        // }
+        samples_since_cool++;
+        if (samples_since_cool >= SAMPLE_COOLING_THRESHOLD) {
+            global_clock++;
+            samples_since_cool = 0;
+            // printf("cyc since last cool: %lu\n", cur_cyc - last_cyc_cool);
+            last_cyc_cool = rdtscp();
+        }
 
         // Time based cooling
-        if (cur_cyc - last_cyc_cool > CYC_COOL_THRESHOLD) {
-            // __atomic_fetch_add(&global_clock, 1, __ATOMIC_RELEASE);
-            global_clock++;
-            last_cyc_cool = cur_cyc;
-        }
+        // if (cur_cyc - last_cyc_cool > CYC_COOL_THRESHOLD) {
+        //     // __atomic_fetch_add(&global_clock, 1, __ATOMIC_RELEASE);
+        //     global_clock++;
+        //     last_cyc_cool = cur_cyc;
+        // }
 
 #endif 
 
@@ -397,7 +353,7 @@ void process_perf_buffer(int cpu_idx, int evt) {
         algo_add_page(page);
         
         if (cold_list.numentries != 0) {
-            struct tmem_page *pred_pages[MAX_NEIGHBORS * MAX_PRED_DEPTH];
+            struct pact_page *pred_pages[MAX_NEIGHBORS * MAX_PRED_DEPTH];
             uint32_t idx = 0;
             algo_predict_pages(page, pred_pages, &idx);
 
@@ -445,7 +401,6 @@ void process_perf_buffer(int cpu_idx, int evt) {
 
 
 void* pebs_scan_thread() {
-    internal_call = true;
     // set cpu
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
@@ -461,7 +416,6 @@ void* pebs_scan_thread() {
 
     
     while (true) {
-        CHECK_KILLED(PEBS_THREAD);
 
         int pebs_start_cpu = 0;
         int num_cores = PEBS_NPROCS;
@@ -472,57 +426,76 @@ void* pebs_scan_thread() {
             }
         }
     }
-    pebs_cleanup();
     return NULL;
 }
 
-void tmem_migrate_page(struct tmem_page *page, int node) {
+void pact_migrate_page(struct pact_page *page, int node) {
     unsigned long nodemask = 1UL << node;
+    unsigned long num_pages = page->size / BASE_PAGE_SIZE;
+    unsigned long max_pages = PAGE_SIZE / BASE_PAGE_SIZE;
+    unsigned long page_idx = 0;
+    void *pages[max_pages];
+    int nodes[max_pages];
+    int status[max_pages];
 
-    if (mbind(page->va_start, page->size, MPOL_BIND, &nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
-        perror("mbind");
-        printf("mbind failed %p\n", page->va_start);
-    } else {
-        if (node == DRAM_NODE) {
-            // was migrated to dram
-            page->in_dram = IN_DRAM;
-#if LRU_ALGO == 1
-            page->hot = false;
-            enqueue_fifo(&cold_list, page);
-#else
-            page->hot = true;
-            enqueue_fifo(&hot_list, page);
-#endif
-#if RECORD == 1
-            struct pebs_rec p_rec = {
-                .va = page->va,
-                .ip = 0,
-                .cyc = rdtscp(),
-                .cpu = 0,
-                .evt = 0
-            };
-            fwrite(&p_rec, sizeof(struct pebs_rec), 1, mig_fp);
-#endif
-        } else {
-#if RECORD == 1
-            struct pebs_rec p_rec = {
-                .va = page->va,
-                .ip = 0,
-                .cyc = rdtscp(),
-                .cpu = 0,
-                .evt = 0
-            };
-            fwrite(&p_rec, sizeof(struct pebs_rec), 1, cold_fp);
-#endif
-            page->in_dram = IN_REM;
-            page->hot = false;
-        }
+    for (unsigned long i = 0; i < max_pages; i++) {
+        LOG_DEBUG("i: %lu, bitmask: 0x%lx\n", i, page->base_bitmask[i / 64]);
+        // if ((page->base_bitmask[i / 64] >> (i % 64)) & 1) {
+            pages[page_idx] = (void *)(page->va + i * BASE_PAGE_SIZE);
+            nodes[page_idx] = node;
+            page_idx++;
+        // }
     }
+    if (move_pages(0, max_pages, pages, nodes, status, MPOL_MF_MOVE) == -1) {
+        perror("move_pages");
+        LOG_DEBUG("move pages failed: %lx\n", page->va);
+    } else {
+        LOG_DEBUG("MIG: %lx size: %lu\n", page->va, page->size);
+    }
+
+//     if (mbind(page->va_start, page->size, MPOL_BIND, &nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
+//         perror("mbind");
+//         printf("mbind failed %p\n", page->va_start);
+//     } else {
+//         if (node == DRAM_NODE) {
+//             // was migrated to dram
+//             page->in_dram = IN_DRAM;
+// #if LRU_ALGO == 1
+//             page->hot = false;
+//             enqueue_fifo(&cold_list, page);
+// #else
+//             page->hot = true;
+//             enqueue_fifo(&hot_list, page);
+// #endif
+// #if RECORD == 1
+//             struct pebs_rec p_rec = {
+//                 .va = page->va,
+//                 .ip = 0,
+//                 .cyc = rdtscp(),
+//                 .cpu = 0,
+//                 .evt = 0
+//             };
+//             fwrite(&p_rec, sizeof(struct pebs_rec), 1, mig_fp);
+// #endif
+//         } else {
+// #if RECORD == 1
+//             struct pebs_rec p_rec = {
+//                 .va = page->va,
+//                 .ip = 0,
+//                 .cyc = rdtscp(),
+//                 .cpu = 0,
+//                 .evt = 0
+//             };
+//             fwrite(&p_rec, sizeof(struct pebs_rec), 1, cold_fp);
+// #endif
+//             page->in_dram = IN_REM;
+//             page->hot = false;
+//         }
+//     }
 }
 
 
 void *migrate_thread() {
-    internal_call = true;
 
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
@@ -531,11 +504,10 @@ void *migrate_thread() {
     assert(s == 0);
     // uint64_t num_loops = 0;
 
-    struct tmem_page *hot_page, *cold_page;
+    struct pact_page *hot_page, *cold_page;
     uint64_t cold_bytes = 0;
 
     while (true) {
-        // CHECK_KILLED(MIGRATE_THREAD);
 
         // Don't do any migrations until hot page comes in
         hot_page = dequeue_fifo(&hot_list);
@@ -555,15 +527,19 @@ void *migrate_thread() {
         mig_queue_time = DEC_MIG_TIME * mig_queue_diff + (1.0 - DEC_MIG_TIME) * mig_queue_time;
 
         // have a valid hot page. Now get cold pages
-        // disable dram mmap temporarily
-        atomic_store_explicit(&dram_lock, true, memory_order_release);
-        uint64_t bytes_free = dram_size - __atomic_load_n(&dram_used, __ATOMIC_ACQUIRE);
+        long bytes_free;
+        numa_node_size(DRAM_NODE, &bytes_free);
+        if (bytes_free < DRAM_BUFFER) {
+            bytes_free = 0;
+        } else {
+            bytes_free -= DRAM_BUFFER;
+        }
 
         if (bytes_free >= hot_page->size) {
             LOG_DEBUG("MIG: enough dram: 0x%lx\n", hot_page->va);
             // Enough space in dram, just migrate hot page
-            // tmem_migrate_pages(&hot_page, 1, DRAM_NODE);
-            tmem_migrate_page(hot_page, DRAM_NODE);
+            // pact_migrate_pages(&hot_page, 1, DRAM_NODE);
+            pact_migrate_page(hot_page, DRAM_NODE);
             hot_page->migrated = true;
             pebs_stats.promotions++;
             
@@ -608,8 +584,8 @@ void *migrate_thread() {
             // assert(!cold_page->hot);
             assert(cold_page->list == NULL);
 
-            // tmem_migrate_pages(&cold_page, 1, REM_NODE);
-            tmem_migrate_page(cold_page, REM_NODE);
+            // pact_migrate_pages(&cold_page, 1, REM_NODE);
+            pact_migrate_page(cold_page, REM_NODE);
             cold_page->migrated = true;
             cold_bytes += cold_page->size;
             LOG_DEBUG("MIG: demoted 0x%lx\n", cold_page->va);
@@ -619,8 +595,8 @@ void *migrate_thread() {
         if (cold_page == NULL) continue;
         // now enough space in dram
         LOG_DEBUG("MIG: now enough space: 0x%lx\n", hot_page->va);
-        // tmem_migrate_pages(&hot_page, 1, DRAM_NODE);
-        tmem_migrate_page(hot_page, DRAM_NODE);
+        // pact_migrate_pages(&hot_page, 1, DRAM_NODE);
+        pact_migrate_page(hot_page, DRAM_NODE);
         hot_page->migrated = true;
         pebs_stats.promotions++;
 
@@ -647,22 +623,17 @@ void start_migrate_thread() {
 }
 
 void pebs_init(void) {
-    internal_call = true;
-
-    for (int i = 0; i < NUM_INTERNAL_THREADS; i++) {
-        atomic_store(&kill_internal_threads[i], false);
-    }
 
 #if PEBS_STATS == 1
     LOG_DEBUG("pebs_stats: %d\n", PEBS_STATS);
     start_pebs_stats_thread();
 #endif
 
-    tmem_trace_fp = fopen("tmem_trace.bin", "wb");
-    if (tmem_trace_fp == NULL) {
-        perror("tmem_trace file fopen");
+    pact_trace_fp = fopen("pact_trace.bin", "wb");
+    if (pact_trace_fp == NULL) {
+        perror("pact_trace file fopen");
     }
-    assert(tmem_trace_fp != NULL);
+    assert(pact_trace_fp != NULL);
 
     int pebs_start_cpu = 0;
     int num_cores = PEBS_NPROCS;
@@ -678,5 +649,4 @@ void pebs_init(void) {
 
     start_migrate_thread();
 
-    internal_call = false;
 }

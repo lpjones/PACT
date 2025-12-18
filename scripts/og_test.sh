@@ -100,8 +100,8 @@ run_app() {
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" -f "${app_dir}/stats.txt" -g1 "cold_pages" "hot_pages" -o "${app_dir}/pages"
   # ./venv/bin/python plot_pebs_mig.py --log-file "${app_dir}/debuglog.txt" --out "${app_dir}/mig_latency"
 
-  ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" "${app_dir}/tmem_trace.bin" -fast
-  ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" "${app_dir}/tmem_trace.bin" -fast -c cpu
+  ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" "${app_dir}/pact_trace.bin" -fast
+  ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" "${app_dir}/pact_trace.bin" -fast -c cpu
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" "${app_dir}/trace.bin" -fast
 
   return ${rc}

@@ -28,7 +28,7 @@
 
 // Use either DRAM_BUFFER or DRAM_SIZE
 #ifndef DRAM_BUFFER 
-#define DRAM_BUFFER (1 * 1024L * 1024L * 1024L)     // How much to leave available on DRAM node
+#define DRAM_BUFFER (1 * 1024 * 1024 * 1024)     // How much to leave available on DRAM node
 #endif
 
 #ifndef DRAM_SIZE
@@ -57,15 +57,15 @@ enum {
 #define MAX_NEIGHBORS 4
 #endif
 
-struct tmem_page;
+struct pact_page;
 
 struct neighbor_page {
-    struct tmem_page *page;
+    struct pact_page *page;
     double distance;
     uint64_t time_diff;
 };
 
-struct tmem_page {
+struct pact_page {
     uint64_t va;
     void* va_start;
     uint64_t size;
@@ -75,10 +75,11 @@ struct tmem_page {
     uint64_t cyc_accessed;
     uint64_t ip;
     uint64_t mig_start;
+    uint64_t base_bitmask[(PAGE_SIZE / BASE_PAGE_SIZE) / 64];
     pthread_mutex_t page_lock;
 
     UT_hash_handle hh;
-    struct tmem_page *next, *prev;
+    struct pact_page *next, *prev;
     struct neighbor_page neighbors[MAX_NEIGHBORS];
     struct fifo_list *list;
 
@@ -90,11 +91,12 @@ struct tmem_page {
     _Atomic bool migrated;
 };
 
-void tmem_init();
-void* tmem_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
-int tmem_munmap(void *addr, size_t length);
-void tmem_cleanup();
-struct tmem_page* find_page(uint64_t va);
-struct tmem_page* find_page_no_lock(uint64_t va);
+void pact_init();
+void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
+int pact_munmap(void *addr, size_t length);
+void pact_cleanup();
+struct pact_page* find_page(uint64_t va);
+struct pact_page* find_page_no_lock(uint64_t va);
+struct pact_page* create_pact_page(uint64_t addr, bool in_fastmem);
 
 #endif

@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <assert.h>
 
-#include "tmem.h"
+#include "pact.h"
 
 extern FILE* stats_fp;
 extern FILE* debug_fp;

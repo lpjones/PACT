@@ -7,19 +7,19 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
-#include "tmem.h"
+#include "pact.h"
 
 struct fifo_list {
-  struct tmem_page *first, *last;
+  struct pact_page *first, *last;
   pthread_mutex_t list_lock;
   size_t numentries;
 };
 
 
-void enqueue_fifo(struct fifo_list *list, struct tmem_page *page);
-struct tmem_page* dequeue_fifo(struct fifo_list *list);
-void page_list_remove_page(struct fifo_list *list, struct tmem_page *page);
-void next_page(struct fifo_list *list, struct tmem_page *page, struct tmem_page **res);
+void enqueue_fifo(struct fifo_list *list, struct pact_page *page);
+struct pact_page* dequeue_fifo(struct fifo_list *list);
+void page_list_remove_page(struct fifo_list *list, struct pact_page *page);
+void next_page(struct fifo_list *list, struct pact_page *page, struct pact_page **res);
 
 #endif
 

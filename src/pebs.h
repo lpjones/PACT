@@ -24,7 +24,6 @@
 #include <sys/ioctl.h>
 
 #include "timer.h"
-#include "interpose.h"
 #include "logging.h"
 #include "spsc-ring.h"
 #include "fifo.h"
@@ -114,7 +113,5 @@ extern struct pebs_stats pebs_stats;
 
 void pebs_init();
 void start_pebs_thread();
-void wait_for_threads();
-void kill_threads();
 
 #endif

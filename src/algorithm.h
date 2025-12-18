@@ -17,7 +17,7 @@
 
 */
 
-#include "tmem.h"
+#include "pact.h"
 
 #ifndef DEC_MIG_TIME
     #define DEC_MIG_TIME 0.01
@@ -31,8 +31,32 @@
     #define MAX_PRED_DEPTH 16
 #endif
 
+#ifndef VA_WEIGHT
+#define VA_WEIGHT 1
+#endif
 
-extern struct tmem_page *page_history[HISTORY_SIZE];
+#ifndef CYC_WEIGHT
+#define CYC_WEIGHT 1
+#endif
+
+#ifndef IP_WEIGHT
+#define IP_WEIGHT 1
+#endif
+
+#ifndef DEC_UP
+#define DEC_UP 0.01
+#endif
+
+#ifndef DEC_DOWN
+#define DEC_DOWN 0.0001
+#endif
+
+#ifndef DEC_DIST
+#define DEC_DIST 0.0001
+#endif
+
+
+extern struct pact_page *page_history[HISTORY_SIZE];
 extern uint32_t page_his_idx;
 extern double mig_time;
 extern double mig_queue_time;
@@ -40,8 +64,8 @@ extern double mig_move_time;
 extern double bot_dist;
 extern double avg_dist;
 
-void algo_add_page(struct tmem_page *page);
-struct tmem_page* algo_predict_page(struct tmem_page *page);
-void algo_predict_pages(struct tmem_page *page, struct tmem_page **pred_pages, uint32_t *idx);
+void algo_add_page(struct pact_page *page);
+struct pact_page* algo_predict_page(struct pact_page *page);
+void algo_predict_pages(struct pact_page *page, struct pact_page **pred_pages, uint32_t *idx);
 
 #endif

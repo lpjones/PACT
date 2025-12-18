@@ -2,7 +2,7 @@
 # run_test.sh Usage: ./run_test.sh              # runs the example at the bottom
 # OR source this file and call run_app "myconfig" "<full command line>"
 
-PRELOAD="/proj/TppPlus/tpp/libnuma_pgmig/src/libtmem.so"
+PRELOAD="/proj/TppPlus/tpp/libnuma_pgmig/src/libpact.so"
 CGUPS_DIR="../workloads/cgups"
 MGUPS_DIR="../../scripts/my_gups"
 HGUPS_DIR="../workloads/hgups"
@@ -81,7 +81,7 @@ run_app() {
   mv -f stats.txt "${app_dir}"
   mv -f debuglog.txt "${app_dir}"
   mv -f time.txt "${app_dir}"
-  mv -f tmem_trace.bin "${app_dir}"
+  mv -f pact_trace.bin "${app_dir}"
   mv -f preds.bin "${app_dir}"
   mv -f mig.bin "${app_dir}"
   mv -f cold.bin "${app_dir}"
@@ -121,8 +121,8 @@ run_app() {
   # --out "${app_dir}/mig_latency"
 
   # ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py"
-  # "${app_dir}/tmem_trace.bin" -fast ./venv/bin/python
-  # "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" "${app_dir}/tmem_trace.bin"
+  # "${app_dir}/pact_trace.bin" -fast ./venv/bin/python
+  # "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py" "${app_dir}/pact_trace.bin"
   # -fast -c cpu ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cluster_no_app.py"
   # "${app_dir}/trace.bin" -fast
 
@@ -173,7 +173,7 @@ grid_search() {
                       run_app "${run_name}" "${GAPBS_DIR}" "bfs" -f "twitter-2010.sg" -n 64 -r 0
 
                       # Trace files too big so remove them
-                      rm -rf "${app_dir}/tmem_trace.bin"
+                      rm -rf "${app_dir}/pact_trace.bin"
                       rm -rf "${app_dir}/debuglog.txt"
                       rm -rf "${app_dir}/trace.bin"
                       rm -rf "${app_dir}/time.txt"
@@ -291,8 +291,9 @@ run_sample_period() {
 
 #resnet current best
 
-# THP echo always | sudo tee /sys/kernel/mm/transparent_hugepage/enabled echo
-# always | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+# THP 
+# echo always | sudo tee /sys/kernel/mm/transparent_hugepage/enabled 
+# echo always | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
 
 # Regular echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled echo
 # never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
@@ -300,7 +301,7 @@ run_sample_period() {
 # run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
 #   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
 #   max_neighbors=8 bfs_algo=0 dfs_algo=1 dram_buffer=1073741824
-run_app "resnet-PAGR" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
+# run_app "resnet-PAGR" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
 
 # run_make cluster_algo=0 hem_algo=1 dfs_algo=0 run_app "resnet-hem"
 # "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
@@ -340,13 +341,17 @@ run_app "resnet-PAGR" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_trai
 # run_make cluster_algo=0 hem_algo=0 dfs_algo=0 run_app "cgups-no"
 # "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
-# run_make cluster_algo=0 hem_algo=1 dfs_algo=0 run_app "cgups-hem"
-# "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
+# run_make cluster_algo=0 hem_algo=1 dfs_algo=0 
+# run_app "cgups-hem" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
 # run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
 #   his_size=8 pred_depth=16 dec_down=0.00005 dec_up=0.1 \
-#   max_neighbors=8 dfs_algo=1 run_app "cgups-PAGR" "${CGUPS_DIR}" "./gups64-rw"
-# 8 move 30 kill 60
+#   max_neighbors=8 dfs_algo=1 sample_period=6400
+echo always | sudo tee /sys/kernel/mm/transparent_hugepage/enabled 
+echo always | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+
+run_make pebs_stats=1 cluster_algo=0 hem_algo=1 sample_period=6400
+run_app "cgups-PAGR" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
 # run_make cluster_algo=1 hem_algo=1 dfs_algo=1 run_app "cgups-both"
 # "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60

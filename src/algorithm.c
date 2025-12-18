@@ -3,33 +3,8 @@
 
 #define ABS(x) ((x) >= 0 ? (x) : -(x))
 
-#ifndef VA_WEIGHT
-#define VA_WEIGHT 1
-#endif
 
-#ifndef CYC_WEIGHT
-#define CYC_WEIGHT 1
-#endif
-
-#ifndef IP_WEIGHT
-#define IP_WEIGHT 1
-#endif
-
-#ifndef DEC_UP
-#define DEC_UP 0.01
-#endif
-
-#ifndef DEC_DOWN
-#define DEC_DOWN 0.0001
-#endif
-
-#ifndef DEC_DIST
-#define DEC_DIST 0.0001
-#endif
-
-
-
-struct tmem_page *page_history[HISTORY_SIZE];
+struct pact_page *page_history[HISTORY_SIZE];
 uint32_t page_his_idx = 0;
 double mig_time = 0;
 double mig_queue_time = 0;
@@ -66,7 +41,7 @@ static inline double update_bot(double bot, double val) {
     return DEC_DOWN * val + (1.0 - DEC_DOWN) * bot;
 }
 
-static double calc_distance(struct tmem_page *a, struct tmem_page *b) {
+static double calc_distance(struct pact_page *a, struct pact_page *b) {
     double distance = 0;
     // double x = 5;
     // printf("%f -> %f\n", (double)(a->va) - (double)(b->va), ABS((double)(a->va) - (double)(b->va)));
@@ -111,14 +86,14 @@ static double calc_distance(struct tmem_page *a, struct tmem_page *b) {
     return distance;
 }
 
-static void update_neighbors(struct tmem_page *old_page) {
+static void update_neighbors(struct pact_page *old_page) {
     // cool neighbors
     for (uint32_t i = 0; i < MAX_NEIGHBORS; i++) {
         old_page->neighbors[i].distance *= 1.01;
     }
 
     for (uint32_t i = 0; i < HISTORY_SIZE; i++) {
-        struct tmem_page *cur_page = page_history[i];
+        struct pact_page *cur_page = page_history[i];
         if (cur_page == old_page) continue;
 
         double distance = calc_distance(old_page, cur_page);
@@ -166,12 +141,12 @@ static void update_neighbors(struct tmem_page *old_page) {
     // printf("\n");
 }
 
-void algo_add_page(struct tmem_page *page) {
+void algo_add_page(struct pact_page *page) {
     // update neighbors of oldest page to get furthest lookahead 
     // then replace it with the new page
 
     // find oldest page O(HISTORY_SIZE)
-    struct tmem_page *old_page = page_history[page_his_idx];
+    struct pact_page *old_page = page_history[page_his_idx];
     uint32_t old_idx = page_his_idx;
 
     if (old_page == NULL) {
@@ -197,7 +172,7 @@ void algo_add_page(struct tmem_page *page) {
 }
 
 // 29
-// static void record_sample(struct tmem_page *page) {
+// static void record_sample(struct pact_page *page) {
 //     struct pebs_rec p_rec = {
 //         .va = page->va, //8
 //         .ip = page->ip, //8
@@ -225,7 +200,7 @@ void algo_add_page(struct tmem_page *page) {
 // page predicting from (pebs_record)
 // neighboring pages (pebs_record + distance + time_diff)
 // threshold
-void algo_predict_pages(struct tmem_page *page, struct tmem_page **pred_pages, uint32_t *idx) {
+void algo_predict_pages(struct pact_page *page, struct pact_page **pred_pages, uint32_t *idx) {
     if (pebs_stats.throttles > pebs_stats.unthrottles) return;
     // record_sample(page); //29
 
@@ -236,12 +211,13 @@ void algo_predict_pages(struct tmem_page *page, struct tmem_page **pred_pages, u
     assert(*idx == 0);
     // double threshold = avg_dist / 4000;
     // LOG_DEBUG("Threshold: %.2e, avg_dist: %.2e\n", bot_dist, avg_dist);
-    double threshold = bot_dist;
 
 #if DFS_ALGO == 1
+    double threshold = bot_dist;
+
     // DFS
     uint64_t tot_time_diff = 0;
-    struct tmem_page *cur_page = page;
+    struct pact_page *cur_page = page;
     for (uint32_t d = 0; d < MAX_PRED_DEPTH; d++) {
         struct neighbor_page *closest_neighbor = NULL;
         // if (d > 1) {

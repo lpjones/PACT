@@ -1,10 +1,10 @@
-# Makefile for building libtmem.so
+# Makefile for building libpact.so
 # Override variables from the command line if desired:
 CC      := clang
 CFLAGS  := -g3 -Wall -O0 -fPIC
 # CFLAGS  := -Wall -O3 -fPIC
 LDFLAGS := -shared
-LIBS    := -lsyscall_intercept -lnuma -lpthread -ldl
+LIBS    := -lnuma -lpthread -ldl
 
 # knobs
 pebs_stats ?= 1
@@ -44,14 +44,14 @@ CFLAGS += -DSAMPLE_PERIOD=$(sample_period)
 CFLAGS += -DRECORD=$(record)
 
 # Sources / Objects
-SRCS := interpose.c tmem.c pebs.c timer.c logging.c spsc-ring.c fifo.c algorithm.c
+SRCS := pact.c pebs.c timer.c logging.c spsc-ring.c fifo.c algorithm.c
 OBJS := $(SRCS:.c=.o)
 
 # Dependency files (generated)
 DEPS := $(OBJS:.o=.d)
 
 # Output
-TARGET := libtmem.so
+TARGET := libpact.so
 
 .PHONY: all default clean distclean help
 

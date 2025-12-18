@@ -32,8 +32,8 @@ criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(model.parameters(), lr=0.01)
 
 # Config
-epochs = 2
-iters_per_epoch = 2
+epochs = 1
+iters_per_epoch = 1
 
 model.train()
 for epoch in range(1, epochs + 1):

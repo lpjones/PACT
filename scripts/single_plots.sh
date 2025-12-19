@@ -142,7 +142,7 @@ run_app() {
 }
 
 # run_app bfs-hem-2GB-100
-run_app resnet-PAGR
+run_app cgups-PAGR
 
 # % modify plots to start y-axis at 0
 # % add references to end of background bibtex

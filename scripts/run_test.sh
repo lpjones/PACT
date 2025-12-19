@@ -288,6 +288,25 @@ run_sample_period() {
 
 # grid_search
 
+echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
+echo never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+
+# run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
+#   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
+#   max_neighbors=8 bfs_algo=0 dfs_algo=1 dram_buffer=1073741824
+# run_app "resnet-PAGR" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
+
+
+echo always | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
+echo always | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+
+# run_make cluster_algo=0 hem_algo=1 dfs_algo=0 dram_buffer=1073741824
+# run_app "cgups-hem" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
+
+run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
+  his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
+  max_neighbors=8 bfs_algo=0 dfs_algo=1 dram_buffer=1073741824
+run_app "cgups-PAGR" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
 #resnet current best
 
@@ -297,10 +316,7 @@ run_sample_period() {
 # Regular echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled echo
 # never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
 
-run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
-  his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
-  max_neighbors=8 bfs_algo=0 dfs_algo=1 dram_buffer=1073741824
-run_app "resnet-PAGR" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
+
 
 # run_make cluster_algo=0 hem_algo=1 dfs_algo=0 run_app "resnet-hem"
 # "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
@@ -340,8 +356,7 @@ run_app "resnet-PAGR" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_trai
 # run_make cluster_algo=0 hem_algo=0 dfs_algo=0 run_app "cgups-no"
 # "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
-run_make cluster_algo=0 hem_algo=1 dfs_algo=0 run_app "cgups-hem"
-"${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
+
 
 # run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
 #   his_size=8 pred_depth=16 dec_down=0.00005 dec_up=0.1 \

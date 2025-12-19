@@ -483,8 +483,10 @@ void pact_migrate_page(struct pact_page *page, int node) {
         perror("mbind");
         printf("mbind failed %p\n", page->va_start);
     } else {
+        page->migrated = true;
         if (node == DRAM_NODE) {
             // was migrated to dram
+            pebs_stats.promotions++;
             page->in_dram = IN_DRAM;
 #if LRU_ALGO == 1
             page->hot = false;
@@ -514,6 +516,7 @@ void pact_migrate_page(struct pact_page *page, int node) {
             };
             fwrite(&p_rec, sizeof(struct pebs_rec), 1, cold_fp);
 #endif
+            pebs_stats.demotions++;
             page->in_dram = IN_REM;
             page->hot = false;
         }
@@ -564,8 +567,8 @@ void *migrate_thread() {
             // Enough space in dram, just migrate hot page
             // pact_migrate_pages(&hot_page, 1, DRAM_NODE);
             pact_migrate_page(hot_page, DRAM_NODE);
-            hot_page->migrated = true;
-            pebs_stats.promotions++;
+            // hot_page->migrated = true;
+            // pebs_stats.promotions++;
             
             __atomic_fetch_add(&dram_used, hot_page->size, __ATOMIC_RELEASE);
             atomic_store_explicit(&dram_lock, false, memory_order_release);
@@ -588,7 +591,7 @@ void *migrate_thread() {
 
                 // enable dram mmap with updated dram_used
                 __atomic_fetch_sub(&dram_used, cold_bytes, __ATOMIC_RELEASE);
-                atomic_store_explicit(&dram_lock, true, memory_order_release);
+                atomic_store_explicit(&dram_lock, false, memory_order_release);
 
                 LOG_DEBUG("MIG: no cold pages, aborting\n");
                 break;
@@ -614,15 +617,15 @@ void *migrate_thread() {
             cold_bytes += cold_page->size;
             LOG_DEBUG("MIG: demoted 0x%lx\n", cold_page->va);
             pthread_mutex_unlock(&cold_page->page_lock);
-            pebs_stats.demotions++;
+            // pebs_stats.demotions++;
         }
         if (cold_page == NULL) continue;
         // now enough space in dram
         LOG_DEBUG("MIG: now enough space: 0x%lx\n", hot_page->va);
         // pact_migrate_pages(&hot_page, 1, DRAM_NODE);
         pact_migrate_page(hot_page, DRAM_NODE);
-        hot_page->migrated = true;
-        pebs_stats.promotions++;
+        // hot_page->migrated = true;
+        // pebs_stats.promotions++;
 
         // enable dram mmap
         __atomic_fetch_add(&dram_used, hot_page->size - cold_bytes, __ATOMIC_RELEASE);

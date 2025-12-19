@@ -86,11 +86,11 @@ void pact_init() {
     add_page(dummy_page);
 
     // check how much free space on dram
-#ifdef DRAM_BUFFER
+#if DRAM_BUFFER != 0
     dram_size = numa_node_size(DRAM_NODE, &dram_free);
-    dram_size -= dram_free;
+    dram_used = dram_size - dram_free;
 #endif
-#ifdef DRAM_SIZE
+#if DRAM_SIZE != 0
     dram_size = DRAM_SIZE;
 #endif
     internal_call = false;
@@ -114,7 +114,7 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
     assert(p != MAP_FAILED);
 
     pthread_mutex_lock(&mmap_lock);
-
+    LOG_DEBUG("dram_used: %lu, length: %lu, dram_size: %lu, dram_lock %d\n", __atomic_load_n(&dram_used, __ATOMIC_ACQUIRE), length, dram_size, atomic_load_explicit(&dram_lock, memory_order_acquire));
     if (__atomic_load_n(&dram_used, __ATOMIC_ACQUIRE) + length <= dram_size 
         && atomic_load_explicit(&dram_lock, memory_order_acquire) == false) {
         // can allocate all on dram

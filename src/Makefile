@@ -19,9 +19,9 @@ dec_down ?= 0.0001
 dec_up ?= 0.01
 max_neighbors ?= 8
 page_size ?= 2097152
-# dram_size ?= 2147483648
-dram_size ?= 0
-dram_buffer ?= 4294967296
+# fast_size ?= 2147483648
+fast_size ?= 0
+fast_buffer ?= 4294967296
 sample_period ?= 100
 record ?= 1
 
@@ -37,8 +37,8 @@ CFLAGS += -DDEC_DOWN=$(dec_down)
 CFLAGS += -DDEC_UP=$(dec_up)
 CFLAGS += -DMAX_NEIGHBORS=$(max_neighbors)
 CFLAGS += -DPAGE_SIZE=$(page_size)
-CFLAGS += -DDRAM_SIZE=$(dram_size)
-CFLAGS += -DDRAM_BUFFER=$(dram_buffer)
+CFLAGS += -DFAST_SIZE=$(fast_size)
+CFLAGS += -DFAST_BUFFER=$(fast_buffer)
 CFLAGS += -DLRU_ALGO=$(lru_algo)
 CFLAGS += -DSAMPLE_PERIOD=$(sample_period)
 CFLAGS += -DRECORD=$(record)

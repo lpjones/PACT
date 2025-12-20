@@ -7,15 +7,15 @@ struct fifo_list free_list;
 pthread_mutex_t pages_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mmap_lock = PTHREAD_MUTEX_INITIALIZER;
 
-long dram_free = 0;
-long dram_size = 0;
-long dram_used = 0;
-long rem_used = 0;
+long fast_free = 0;
+long fast_size = 0;
+long fast_used = 0;
+long slow_used = 0;
 
 static uint64_t max_pact_va = 0;
 static uint64_t min_pact_va = UINT64_MAX;
 
-_Atomic bool dram_lock = false;
+_Atomic bool fast_lock = false;
 
 // If the allocations are smaller than the PAGE_SIZE it's possible to 
 void add_page(struct pact_page *page) {
@@ -69,29 +69,29 @@ struct pact_page* find_page(uint64_t va)
 
 void pact_init() {
     internal_call = true;
-#if (DRAM_BUFFER != 0 && DRAM_SIZE != 0) || (DRAM_BUFFER == 0 && DRAM_SIZE == 0)
-    fprintf(stderr, "Can't have both DRAM_BUFFER and DRAM_SIZE\n");
+#if (FAST_BUFFER != 0 && FAST_SIZE != 0) || (FAST_BUFFER == 0 && FAST_SIZE == 0)
+    fprintf(stderr, "Can't have both FAST_BUFFER and FAST_SIZE\n");
     exit(1);
 #endif
 
-    // Puts non-tracked mmaps into remote memory so it doesn't exceed
-    // the set DRAM capacity
-    numa_set_preferred(DRAM_NODE);
+    // Puts non-tracked mmaps into slow memory so it doesn't exceed
+    // the set FAST capacity
+    numa_set_preferred(FAST_NODE);
 
-    // LOG_DEBUG("DRAM size: %lu, REMOTE size: %lu\n", DRAM_SIZE, REMOTE_SIZE);
+    // LOG_DEBUG("FAST size: %lu, REMOTE size: %lu\n", FAST_SIZE, REMOTE_SIZE);
 
     LOG_DEBUG("finished pact_init\n");
 
     struct pact_page *dummy_page = calloc(1, sizeof(struct pact_page));
     add_page(dummy_page);
 
-    // check how much free space on dram
-#if DRAM_BUFFER != 0
-    dram_size = numa_node_size(DRAM_NODE, &dram_free);
-    dram_used = dram_size - dram_free;
+    // check how much free space on fast
+#if FAST_BUFFER != 0
+    fast_size = numa_node_size(FAST_NODE, &fast_free);
+    fast_used = fast_size - fast_free;
 #endif
-#if DRAM_SIZE != 0
-    dram_size = DRAM_SIZE;
+#if FAST_SIZE != 0
+    fast_size = FAST_SIZE;
 #endif
     internal_call = false;
 }
@@ -106,58 +106,58 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
     length = PAGE_ROUND_UP_BASE(length);
     internal_call = true;
 
-    unsigned long dram_nodemask = 1UL << DRAM_NODE;
-    unsigned long rem_nodemask = 1UL << REM_NODE;
-    void *p_dram = NULL, *p_rem = NULL;
+    unsigned long fast_nodemask = 1UL << FAST_NODE;
+    unsigned long slow_nodemask = 1UL << REM_NODE;
+    void *p_fast = NULL, *p_slow = NULL;
 
     void *p = libc_mmap(addr, length, prot, flags, fd, offset);
     assert(p != MAP_FAILED);
 
     pthread_mutex_lock(&mmap_lock);
-    LOG_DEBUG("dram_used: %lu, length: %lu, dram_size: %lu, dram_lock %d\n", __atomic_load_n(&dram_used, __ATOMIC_ACQUIRE), length, dram_size, atomic_load_explicit(&dram_lock, memory_order_acquire));
-    if (__atomic_load_n(&dram_used, __ATOMIC_ACQUIRE) + length <= dram_size 
-        && atomic_load_explicit(&dram_lock, memory_order_acquire) == false) {
-        // can allocate all on dram
-        __atomic_fetch_add(&dram_used, length, __ATOMIC_RELEASE);
-        // dram_used += length;
+    LOG_DEBUG("fast_used: %lu, length: %lu, fast_size: %lu, fast_lock %d\n", __atomic_load_n(&fast_used, __ATOMIC_ACQUIRE), length, fast_size, atomic_load_explicit(&fast_lock, memory_order_acquire));
+    if (__atomic_load_n(&fast_used, __ATOMIC_ACQUIRE) + length <= fast_size 
+        && atomic_load_explicit(&fast_lock, memory_order_acquire) == false) {
+        // can allocate all on fast
+        __atomic_fetch_add(&fast_used, length, __ATOMIC_RELEASE);
+        // fast_used += length;
         pthread_mutex_unlock(&mmap_lock);
-        LOG_DEBUG("MMAP: All DRAM\n");
+        LOG_DEBUG("MMAP: All FAST\n");
 
 
-        if (mbind(p, length, MPOL_PREFERRED, &dram_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT)) {
+        if (mbind(p, length, MPOL_PREFERRED, &fast_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT)) {
             perror("mbind");
             assert(0);
         }
         
-        p_dram = p;
-        p_rem = p_dram + length + 1;    // Used later to check which node page is in
-    } else if (dram_used + PAGE_SIZE > dram_size || atomic_load_explicit(&dram_lock, memory_order_acquire)) {
+        p_fast = p;
+        p_slow = p_fast + length + 1;    // Used later to check which node page is in
+    } else if (fast_used + PAGE_SIZE > fast_size || atomic_load_explicit(&fast_lock, memory_order_acquire)) {
         pthread_mutex_unlock(&mmap_lock);
         LOG_DEBUG("MMAP: All Remote\n");
-        // dram full, all on remote
-        if (mbind(p, length, MPOL_PREFERRED, &rem_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT)) {
+        // fast full, all on slow
+        if (mbind(p, length, MPOL_PREFERRED, &slow_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT)) {
             perror("mbind");
             assert(0);
         }
-        p_rem = p;
+        p_slow = p;
     } else {
-        // split between dram and remote
-        uint64_t dram_mmap_size = PAGE_ROUND_DOWN(dram_size - dram_used);
-        // dram_used += dram_mmap_size;
-        __atomic_fetch_add(&dram_used, dram_mmap_size, __ATOMIC_RELEASE);
+        // split between fast and slow
+        uint64_t fast_mmap_size = PAGE_ROUND_DOWN(fast_size - fast_used);
+        // fast_used += fast_mmap_size;
+        __atomic_fetch_add(&fast_used, fast_mmap_size, __ATOMIC_RELEASE);
         pthread_mutex_unlock(&mmap_lock);
         
-        uint64_t rem_mmap_size = length - dram_mmap_size;
+        uint64_t slow_mmap_size = length - fast_mmap_size;
 
 
-        LOG_DEBUG("MMAP: dram: %lu, remote: %lu\n", dram_mmap_size, rem_mmap_size);
-        p_dram = p;
-        p_rem = p_dram + dram_mmap_size;
-        if (mbind(p_dram, dram_mmap_size, MPOL_PREFERRED, &dram_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
+        LOG_DEBUG("MMAP: fast: %lu, slow: %lu\n", fast_mmap_size, slow_mmap_size);
+        p_fast = p;
+        p_slow = p_fast + fast_mmap_size;
+        if (mbind(p_fast, fast_mmap_size, MPOL_PREFERRED, &fast_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
             perror("mbind");
             assert(0);
         }
-        if (mbind(p_rem, rem_mmap_size, MPOL_PREFERRED, &rem_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
+        if (mbind(p_slow, slow_mmap_size, MPOL_PREFERRED, &slow_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
             perror("mbind");
             assert(0);
         }
@@ -166,7 +166,7 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
     
 
 
-    // LOG_DEBUG("dram_size: %ld, dram_free: %ld\n", dram_size, dram_free);
+    // LOG_DEBUG("fast_size: %ld, fast_free: %ld\n", fast_size, fast_free);
     if (p == MAP_FAILED) {
         LOG_DEBUG("mmap failed\n");
         return MAP_FAILED;
@@ -210,7 +210,7 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         // page->next = NULL;
 
 
-        page->in_dram = (page->va_start >= p_rem) ? IN_REM : IN_DRAM;
+        page->in_fast = (page->va_start >= p_slow) ? IN_REM : IN_FAST;
         page->hot = false;
         page->free = false;
         page->migrating = false;
@@ -218,7 +218,7 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         memset(page->neighbors, 0, MAX_NEIGHBORS * sizeof(struct neighbor_page));
 
         assert(page->list == NULL);
-        if (page->in_dram == IN_DRAM) {
+        if (page->in_fast == IN_FAST) {
             enqueue_fifo(&cold_list, page);
         }
 
@@ -268,7 +268,7 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         page->prev = NULL;
         page->next = NULL;
 
-        page->in_dram = (page->va_start >= p_rem) ? IN_REM : IN_DRAM;
+        page->in_fast = (page->va_start >= p_slow) ? IN_REM : IN_FAST;
         page->hot = false;
         page->free = false;
         page->migrating = false;
@@ -276,7 +276,7 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         memset(page->neighbors, 0, MAX_NEIGHBORS * sizeof(struct neighbor_page));
         pthread_mutex_init(&page->page_lock, NULL);
         page->list = NULL;
-        if (page->in_dram == IN_DRAM) {
+        if (page->in_fast == IN_FAST) {
             enqueue_fifo(&cold_list, page);
         }
 
@@ -310,8 +310,8 @@ int pact_munmap(void *addr, size_t length) {
             assert(page->free == false);
             page->free = true;
             remove_page(page);
-            // if (page->in_dram == IN_DRAM) {
-            //     dram_used -= page->size;
+            // if (page->in_fast == IN_FAST) {
+            //     fast_used -= page->size;
             // }
             pebs_stats.mem_allocated -= page->size;
 

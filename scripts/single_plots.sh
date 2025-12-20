@@ -28,14 +28,14 @@ run_app() {
 
   # $py_bin "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" \
   #   -f "${app_dir}/stats.txt" \
-  #   -g1 "dram_free" "dram_used" "dram_size" "dram_cap" \
+  #   -g1 "fast_free" "fast_used" "fast_size" "fast_cap" \
   #   --labels "" \
-  #   -o "${app_dir}/dram_stats"
+  #   -o "${app_dir}/fast_stats"
 
   $py_bin "${PLOT_SCRIPTS_DIR}/plot_stats.py" \
     "${app_dir}/stats.txt" \
     "${app_dir}/accesses.png" \
-    --metrics "dram_accesses" "rem_accesses" \
+    --metrics "fast_accesses" "slow_accesses" \
     --labels "Fast accesses" "Slow Accesses" \
     --title "Accesses" \
     --ylabel "Accesses"
@@ -43,7 +43,7 @@ run_app() {
   $py_bin "${PLOT_SCRIPTS_DIR}/plot_stats.py" \
     "${app_dir}/stats.txt" \
     "${app_dir}/percent.png" \
-    --metrics "percent_dram" \
+    --metrics "percent_fast" \
     --labels "Percent Fast mem" \
     --title "Percent Fast Mem" \
     --ylabel "Percent (%)"
@@ -51,7 +51,7 @@ run_app() {
   $py_bin "${PLOT_SCRIPTS_DIR}/plot_stats.py" \
     "${app_dir}/stats.txt" \
     "${app_dir}/mem.png" \
-    --metrics "dram_used" "dram_size" "dram_free" "rem_used" \
+    --metrics "fast_used" "fast_size" "fast_free" "slow_used" \
     --labels "Fast Mem used" "Fast Mem size" "Fast Mem free" "Slow Mem used" \
     --title "Mem" \
     --ylabel "Mem used (Bytes)"
@@ -90,7 +90,7 @@ run_app() {
 
   # $py_bin "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" \
   #   -f "${app_dir}/stats.txt" \
-  #   -g1 "percent_dram" \
+  #   -g1 "percent_fast" \
   #   --labels "" \
   #   -o "${app_dir}/percent"
 

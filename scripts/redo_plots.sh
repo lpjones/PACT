@@ -38,9 +38,9 @@ run_app() {
 #   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_cgups_mul.py" "${app_dir}/app.txt" "${app_dir}/throughput.png"
 #   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_gapbs_mul.py" "${app_dir}/app.txt" "${app_dir}/gapbs_times.png"
 
-#   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" -f "${app_dir}/stats.txt" -g1 "dram_free" "dram_used" "dram_size" "dram_cap" -o "${app_dir}/dram_stats"
-#   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" -f "${app_dir}/stats.txt" -g1 "dram_accesses" "rem_accesses" -o "${app_dir}/accesses"
-#   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" -f "${app_dir}/stats.txt" -g1 "percent_dram" -o "${app_dir}/percent"
+#   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" -f "${app_dir}/stats.txt" -g1 "fast_free" "fast_used" "fast_size" "fast_cap" -o "${app_dir}/fast_stats"
+#   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" -f "${app_dir}/stats.txt" -g1 "fast_accesses" "slow_accesses" -o "${app_dir}/accesses"
+#   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" -f "${app_dir}/stats.txt" -g1 "percent_fast" -o "${app_dir}/percent"
 #   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" -f "${app_dir}/stats.txt" -g1 "internal_mem_overhead" -g2 "mem_allocated" -o "${app_dir}/mem"
 #   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" -f "${app_dir}/stats.txt" -g1 "promotions" "demotions" -g2 "threshold" -o "${app_dir}/migrations"
 #   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" -f "${app_dir}/stats.txt" -g1 "pebs_resets" -o "${app_dir}/resets"
@@ -120,7 +120,7 @@ run_stats_pagr_hem() {
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" \
     -f "${app_dir}/resnet-PAGR-${app}/stats.txt" \
     "${app_dir}/resnet-hem-${app}/stats.txt" \
-    -g1 "percent_dram" \
+    -g1 "percent_fast" \
     --labels "PAGR" "HeMem" \
     --start-percent 0 \
     --end-percent 10 \
@@ -133,7 +133,7 @@ run_stats_pagr_hem() {
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" \
     -f "${app_dir}/bc-PAGR-${app}/stats.txt" \
     "${app_dir}/bc-hem-${app}/stats.txt" \
-    -g1 "percent_dram" \
+    -g1 "percent_fast" \
     --labels "PAGR" "HeMem" \
     --start-percent 0 \
     --end-percent 100 \
@@ -146,7 +146,7 @@ run_stats_pagr_hem() {
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" \
     -f "${app_dir}/bfs-PAGR-${app}/stats.txt" \
     "${app_dir}/bfs-hem-${app}/stats.txt" \
-    -g1 "percent_dram" \
+    -g1 "percent_fast" \
     --labels "PAGR" "HeMem" \
     --start-percent 0 \
     --end-percent 100 \
@@ -159,7 +159,7 @@ run_stats_pagr_hem() {
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" \
     -f "${app_dir}/stream-PAGR-${app}/stats.txt" \
     "${app_dir}/stream-hem-${app}/stats.txt" \
-    -g1 "percent_dram" \
+    -g1 "percent_fast" \
     --labels "PAGR" "HeMem" \
     --start-percent 0 \
     --end-percent 100 \
@@ -172,7 +172,7 @@ run_stats_pagr_hem() {
   ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" \
     -f "${app_dir}/cgups-PAGR-${app}/stats.txt" \
     "${app_dir}/cgups-hem-${app}/stats.txt" \
-    -g1 "percent_dram" \
+    -g1 "percent_fast" \
     --labels "PAGR" "HeMem" \
     --start-percent 0 \
     --end-percent 100 \

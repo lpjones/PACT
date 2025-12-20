@@ -84,7 +84,7 @@ run_app() {
 # run_app "cgups" bash -c "${CGUPS_DIR}/gups64-rw 16 move 30 kill 60"
 #
 # Example calling multiple runs:
-run_app "cgups-alldram" "${CGUPS_DIR}/gups64-rw" 8 move 30 kill 60
+run_app "cgups-allfast" "${CGUPS_DIR}/gups64-rw" 8 move 30 kill 60
 # run_app "mgups-reg" "${MGUPS_DIR}/gups" 16000 2000 8 60 30 16
 # run_app "hgups-reg" "${HGUPS_DIR}/gups-hotset-move" 8 100000000 34 8 30
 # run_app "bfs-reg" "${GAPS_DIR}/bfs" -f "${GAPS_DIR}/twitter-2010.sg" -n 8 -r 0

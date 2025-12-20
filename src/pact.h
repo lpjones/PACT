@@ -9,10 +9,10 @@
 #include "uthash.h"
 #include "algorithm.h"
 
-// #define DRAM_SIZE (14 * (1024UL * 1024UL * 1024UL))
+// #define FAST_SIZE (14 * (1024UL * 1024UL * 1024UL))
 // #define REMOTE_SIZE (6 * (1024UL * 1024UL * 1024UL))
 
-#define DRAM_NODE 0
+#define FAST_NODE 0
 #define REM_NODE 1
 
 // #define PAGE_SIZE 4096UL              // 4KB
@@ -26,14 +26,14 @@
 #define PAGE_MASK (~(PAGE_SIZE - 1))
 #define BASE_PAGE_MASK (~(BASE_PAGE_SIZE - 1))
 
-// Use either DRAM_BUFFER or DRAM_SIZE
-#ifndef DRAM_BUFFER 
-#define DRAM_BUFFER (1 * 1024L * 1024L * 1024L)     // How much to leave available on DRAM node
+// Use either FAST_BUFFER or FAST_SIZE
+#ifndef FAST_BUFFER 
+#define FAST_BUFFER (1 * 1024L * 1024L * 1024L)     // How much to leave available on FAST node
 #endif
 
-#ifndef DRAM_SIZE
-    #define DRAM_SIZE (0)
-    // #define DRAM_SIZE (2 * 1024L * 1024L * 1024L)
+#ifndef FAST_SIZE
+    #define FAST_SIZE (0)
+    // #define FAST_SIZE (2 * 1024L * 1024L * 1024L)
 #endif
 
 
@@ -41,15 +41,15 @@ extern struct fifo_list hot_list;
 extern struct fifo_list cold_list;
 extern struct fifo_list free_list;
 
-extern long dram_free;
-extern long dram_size;
-extern long dram_used;
-extern long rem_used;
+extern long fast_free;
+extern long fast_size;
+extern long fast_used;
+extern long slow_used;
 extern pthread_mutex_t mmap_lock;
-extern _Atomic bool dram_lock;
+extern _Atomic bool fast_lock;
 
 enum {
-    IN_DRAM,
+    IN_FAST,
     IN_REM
 };
 
@@ -83,7 +83,7 @@ struct pact_page {
     struct fifo_list *list;
 
     // Page states
-    _Atomic uint8_t in_dram;
+    _Atomic uint8_t in_fast;
     _Atomic bool hot;
     _Atomic bool free;
     _Atomic bool migrating;

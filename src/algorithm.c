@@ -96,9 +96,9 @@ static double calc_distance(struct pact_page *a, struct pact_page *b) {
 
     // if (distance == 0) return ;
 
-    double percent_dram = pebs_stats.dram_accesses / (pebs_stats.dram_accesses + pebs_stats.rem_accesses + 1);
+    double percent_fast = pebs_stats.fast_accesses / (pebs_stats.fast_accesses + pebs_stats.slow_accesses + 1);
 
-    bot_dist = update_bot(bot_dist, distance * (1 - percent_dram * percent_dram));
+    bot_dist = update_bot(bot_dist, distance * (1 - percent_fast * percent_fast));
 
     // when the percent is good you want it to do less (lower threshold)
     // when the percent is bad you want it to do more (higher threshold)
@@ -203,7 +203,7 @@ void algo_add_page(struct pact_page *page) {
 //         .ip = page->ip, //8
 //         .cyc = page->cyc_accessed, //8
 //         .cpu = 0, //4
-//         .evt = page->in_dram //1
+//         .evt = page->in_fast //1
 //     };
 //     fwrite(&p_rec, sizeof(struct pebs_rec), 1, pred_fp);
 // }

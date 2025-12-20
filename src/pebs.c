@@ -120,15 +120,15 @@ void* pebs_stats_thread() {
         LOG_STATS("\twrapped_records: [%lu]\twrapped_headers: [%lu]\n", 
                 pebs_stats.wrapped_records, pebs_stats.wrapped_headers);
 
-#if DRAM_BUFFER != 0
-        LOG_STATS("\tdram_free: [%ld]\tdram_used: [%ld]\t dram_size: [%ld]\trem_used: [%ld]\n", dram_free, dram_used, dram_size, rem_used);
+#if FAST_BUFFER != 0
+        LOG_STATS("\tfast_free: [%ld]\tfast_used: [%ld]\t fast_size: [%ld]\tslow_used: [%ld]\n", fast_free, fast_used, fast_size, slow_used);
 #endif
-#if DRAM_SIZE != 0
-        LOG_STATS("\tdram_used: [%ld]\t dram_size: [%ld]\tnon_tracked_mem: [%lu]\n", dram_used, dram_size, pebs_stats.non_tracked_mem);
+#if FAST_SIZE != 0
+        LOG_STATS("\tfast_used: [%ld]\t fast_size: [%ld]\tnon_tracked_mem: [%lu]\n", fast_used, fast_size, pebs_stats.non_tracked_mem);
 #endif
-        double percent_dram = 100.0 * pebs_stats.dram_accesses / (pebs_stats.dram_accesses + pebs_stats.rem_accesses);
-        LOG_STATS("\tdram_accesses: [%ld]\trem_accesses: [%ld]\t percent_dram: [%.2f]\n", 
-            pebs_stats.dram_accesses, pebs_stats.rem_accesses, percent_dram);
+        double percent_fast = 100.0 * pebs_stats.fast_accesses / (pebs_stats.fast_accesses + pebs_stats.slow_accesses);
+        LOG_STATS("\tfast_accesses: [%ld]\tslow_accesses: [%ld]\t percent_fast: [%.2f]\n", 
+            pebs_stats.fast_accesses, pebs_stats.slow_accesses, percent_fast);
         
         uint64_t migrations = pebs_stats.promotions + pebs_stats.demotions;
         LOG_STATS("\tpromotions: [%lu]\tdemotions: [%lu]\tmigrations: [%lu]\tpebs_resets: [%lu]\tmig_move_time: [%.2f]\tmig_queue_time: [%.2f]\n", 
@@ -140,8 +140,8 @@ void* pebs_stats_thread() {
 
 
 
-        pebs_stats.dram_accesses = 0;
-        pebs_stats.rem_accesses = 0;
+        pebs_stats.fast_accesses = 0;
+        pebs_stats.slow_accesses = 0;
         pebs_stats.promotions = 0;
         pebs_stats.demotions = 0;
         pebs_stats.throttles = 0;
@@ -149,15 +149,15 @@ void* pebs_stats_thread() {
         pebs_stats.pebs_resets = 0;
         
 
-#if DRAM_BUFFER != 0
-        // hacky way to update dram_used every second in case there's drift over time
-        dram_size = numa_node_size(DRAM_NODE, &dram_free);
-        dram_used = dram_size - dram_free;
-        dram_size -= DRAM_BUFFER;
+#if FAST_BUFFER != 0
+        // hacky way to update fast_used every second in case there's drift over time
+        fast_size = numa_node_size(FAST_NODE, &fast_free);
+        fast_used = fast_size - fast_free;
+        fast_size -= FAST_BUFFER;
 
-        long rem_free;
-        long rem_size = numa_node_size(REM_NODE, &rem_free);
-        rem_used = rem_size - rem_free;
+        long slow_free;
+        long slow_size = numa_node_size(REM_NODE, &slow_free);
+        slow_used = slow_size - slow_free;
 #endif
     }
     return NULL;
@@ -186,12 +186,12 @@ void make_hot_request(struct pact_page* page) {
     page->hot = true;
     
     // add to hot list if:
-    // page is not already in hot list and in remote mem
-    if (page->list != &hot_list && page->in_dram == IN_REM) {
+    // page is not already in hot list and in slow mem
+    if (page->list != &hot_list && page->in_fast == IN_REM) {
         // page should not be hot
-        // not be cold since all cold pages are in dram
+        // not be cold since all cold pages are in fast
         // not be free 
-        // either was in remote mem or just got dequeued
+        // either was in slow mem or just got dequeued
         // from cold list in migrate thread
         // page->list == &cold_list and in Remote
 #if LRU_ALGO == 0
@@ -206,14 +206,14 @@ void make_hot_request(struct pact_page* page) {
 
     }
 #if LRU_ALGO == 1
-    // If already in dram update LRU cold list
-    else if (page->in_dram == IN_DRAM) {
+    // If already in fast update LRU cold list
+    else if (page->in_fast == IN_FAST) {
         assert(page->list == &cold_list);
         page_list_remove_page(&cold_list, page);
         enqueue_fifo(&cold_list, page);
     }
 #endif
-    // printf("page is either already in hot list or is in remote memory\n");
+    // printf("page is either already in hot list or is in slow memory\n");
     
     pthread_mutex_unlock(&page->page_lock);
 
@@ -236,8 +236,8 @@ void make_cold_request(struct pact_page* page) {
 #if LRU_ALGO == 0
     // move to cold list if:
     // page is not already in cold list and
-    // page is in dram
-    if (page->list != &cold_list && page->in_dram == IN_DRAM) {
+    // page is in fast
+    if (page->list != &cold_list && page->in_fast == IN_FAST) {
         // remove from hot list
         if (page->list != NULL) {
             assert(page->list == &hot_list);
@@ -249,7 +249,7 @@ void make_cold_request(struct pact_page* page) {
 #else
     // Even if page is already in cold list
     // move to back of cold list for LRU
-    if (page->in_dram == IN_DRAM) {
+    if (page->in_fast == IN_FAST) {
         // assert(page->list != NULL);
         assert(page->list != &free_list);
         if (page->list != NULL) {   // page could be dequeued from migrate thread
@@ -340,8 +340,8 @@ void process_perf_buffer(int cpu_idx, int evt) {
         page->accesses >>= (global_clock - page->local_clock);
         page->local_clock = global_clock;
 
-        if (evt == DRAMREAD) pebs_stats.dram_accesses++;
-        else pebs_stats.rem_accesses++;
+        if (evt == FASTREAD) pebs_stats.fast_accesses++;
+        else pebs_stats.slow_accesses++;
         page->accesses++;
 
         uint64_t cur_cyc = rdtscp();
@@ -352,7 +352,7 @@ void process_perf_buffer(int cpu_idx, int evt) {
 
         // LRU cold list
         // if sample is cold move to end of cold queue
-        // Everything in DRAM is cold
+        // Everything in FAST is cold
 
 #if HEM_ALGO == 1
         if (page->accesses >= HOT_THRESHOLD) {
@@ -420,7 +420,7 @@ void process_perf_buffer(int cpu_idx, int evt) {
         
 #if LRU_ALGO == 1
         // LRU based cold list
-        // everything in DRAM is in cold list
+        // everything in FAST is in cold list
         // with oldest page at front of queue
         make_cold_request(page);
 #endif
@@ -484,10 +484,10 @@ void pact_migrate_page(struct pact_page *page, int node) {
         printf("mbind failed %p\n", page->va_start);
     } else {
         page->migrated = true;
-        if (node == DRAM_NODE) {
-            // was migrated to dram
+        if (node == FAST_NODE) {
+            // was migrated to fast
             pebs_stats.promotions++;
-            page->in_dram = IN_DRAM;
+            page->in_fast = IN_FAST;
 #if LRU_ALGO == 1
             page->hot = false;
             enqueue_fifo(&cold_list, page);
@@ -517,7 +517,7 @@ void pact_migrate_page(struct pact_page *page, int node) {
             fwrite(&p_rec, sizeof(struct pebs_rec), 1, cold_fp);
 #endif
             pebs_stats.demotions++;
-            page->in_dram = IN_REM;
+            page->in_fast = IN_REM;
             page->hot = false;
         }
     }
@@ -546,7 +546,7 @@ void *migrate_thread() {
         pthread_mutex_lock(&hot_page->page_lock);
 
         assert(hot_page != NULL);
-        if (hot_page->list != NULL || hot_page->in_dram == IN_DRAM) {
+        if (hot_page->list != NULL || hot_page->in_fast == IN_FAST) {
             pthread_mutex_unlock(&hot_page->page_lock);
             continue;
         }
@@ -558,20 +558,20 @@ void *migrate_thread() {
         mig_queue_time = DEC_MIG_TIME * mig_queue_diff + (1.0 - DEC_MIG_TIME) * mig_queue_time;
 
         // have a valid hot page. Now get cold pages
-        // disable dram mmap temporarily
-        atomic_store_explicit(&dram_lock, true, memory_order_release);
-        uint64_t bytes_free = dram_size - __atomic_load_n(&dram_used, __ATOMIC_ACQUIRE);
+        // disable fast mmap temporarily
+        atomic_store_explicit(&fast_lock, true, memory_order_release);
+        uint64_t bytes_free = fast_size - __atomic_load_n(&fast_used, __ATOMIC_ACQUIRE);
 
         if (bytes_free >= hot_page->size) {
-            LOG_DEBUG("MIG: enough dram: 0x%lx\n", hot_page->va);
-            // Enough space in dram, just migrate hot page
-            // pact_migrate_pages(&hot_page, 1, DRAM_NODE);
-            pact_migrate_page(hot_page, DRAM_NODE);
+            LOG_DEBUG("MIG: enough fast: 0x%lx\n", hot_page->va);
+            // Enough space in fast, just migrate hot page
+            // pact_migrate_pages(&hot_page, 1, FAST_NODE);
+            pact_migrate_page(hot_page, FAST_NODE);
             // hot_page->migrated = true;
             // pebs_stats.promotions++;
             
-            __atomic_fetch_add(&dram_used, hot_page->size, __ATOMIC_RELEASE);
-            atomic_store_explicit(&dram_lock, false, memory_order_release);
+            __atomic_fetch_add(&fast_used, hot_page->size, __ATOMIC_RELEASE);
+            atomic_store_explicit(&fast_lock, false, memory_order_release);
             LOG_DEBUG("MIG: Finished migration: 0x%lx\n", hot_page->va);
             uint64_t mig_move_diff = rdtscp() - mig_queue_cyc;
             mig_move_time = DEC_MIG_TIME * mig_move_diff + (1.0 - DEC_MIG_TIME) * mig_move_time;
@@ -581,7 +581,7 @@ void *migrate_thread() {
         }
 
         cold_bytes = 0;
-        // Not enough space in dram, demote cold pages until enough space
+        // Not enough space in fast, demote cold pages until enough space
         while (bytes_free + cold_bytes < hot_page->size) {
             cold_page = dequeue_fifo(&cold_list);
             if (cold_page == NULL) {
@@ -589,9 +589,9 @@ void *migrate_thread() {
                 // enqueue_fifo(&hot_list, hot_page);
                 pthread_mutex_unlock(&hot_page->page_lock);
 
-                // enable dram mmap with updated dram_used
-                __atomic_fetch_sub(&dram_used, cold_bytes, __ATOMIC_RELEASE);
-                atomic_store_explicit(&dram_lock, false, memory_order_release);
+                // enable fast mmap with updated fast_used
+                __atomic_fetch_sub(&fast_used, cold_bytes, __ATOMIC_RELEASE);
+                atomic_store_explicit(&fast_lock, false, memory_order_release);
 
                 LOG_DEBUG("MIG: no cold pages, aborting\n");
                 break;
@@ -601,13 +601,13 @@ void *migrate_thread() {
 #if LRU_ALGO == 1
             if (cold_page->list != NULL) {
 #else
-            if (cold_page->list != NULL || cold_page->in_dram == IN_REM || cold_page->hot) {
+            if (cold_page->list != NULL || cold_page->in_fast == IN_REM || cold_page->hot) {
 #endif
                 // page got yoinked
                 pthread_mutex_unlock(&cold_page->page_lock);
                 continue;
             }
-            assert(cold_page->in_dram == IN_DRAM);
+            assert(cold_page->in_fast == IN_FAST);
             // assert(!cold_page->hot);
             assert(cold_page->list == NULL);
 
@@ -620,16 +620,16 @@ void *migrate_thread() {
             // pebs_stats.demotions++;
         }
         if (cold_page == NULL) continue;
-        // now enough space in dram
+        // now enough space in fast
         LOG_DEBUG("MIG: now enough space: 0x%lx\n", hot_page->va);
-        // pact_migrate_pages(&hot_page, 1, DRAM_NODE);
-        pact_migrate_page(hot_page, DRAM_NODE);
+        // pact_migrate_pages(&hot_page, 1, FAST_NODE);
+        pact_migrate_page(hot_page, FAST_NODE);
         // hot_page->migrated = true;
         // pebs_stats.promotions++;
 
-        // enable dram mmap
-        __atomic_fetch_add(&dram_used, hot_page->size - cold_bytes, __ATOMIC_RELEASE);
-        atomic_store_explicit(&dram_lock, false, memory_order_release);
+        // enable fast mmap
+        __atomic_fetch_add(&fast_used, hot_page->size - cold_bytes, __ATOMIC_RELEASE);
+        atomic_store_explicit(&fast_lock, false, memory_order_release);
         LOG_DEBUG("MIG: Finished migration: 0x%lx\n", hot_page->va);
 
         uint64_t mig_move_diff = rdtscp() - mig_queue_cyc;
@@ -671,9 +671,9 @@ void pebs_init(void) {
     int num_cores = PEBS_NPROCS;
     
     for (int i = pebs_start_cpu; i < pebs_start_cpu + num_cores; i++) {
-        perf_page[i][DRAMREAD] = perf_setup(0x1d3, 0, i, i * 2, DRAMREAD);      // MEM_LOAD_L3_MISS_RETIRED.LOCAL_DRAM, mem_load_uops_l3_miss_retired.local_dram
-        perf_page[i][REMREAD] = perf_setup(0x4d3, 0, i, i * 2, REMREAD);     //  mem_load_uops_l3_miss_retired.remote_dram
-        no_samples[i][DRAMREAD] = 0;
+        perf_page[i][FASTREAD] = perf_setup(0x1d3, 0, i, i * 2, FASTREAD);      // MEM_LOAD_L3_MISS_RETIRED.LOCAL_FAST, mem_load_uops_l3_miss_retired.local_dram
+        perf_page[i][REMREAD] = perf_setup(0x4d3, 0, i, i * 2, REMREAD);     //  mem_load_uops_l3_miss_retired.remote_fast
+        no_samples[i][FASTREAD] = 0;
         no_samples[i][REMREAD] = 0;
     }
 

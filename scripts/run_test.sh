@@ -100,12 +100,12 @@ run_app() {
   # "${app_dir}/gapbs_times.png"
 
   # ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" -f
-  # "${app_dir}/stats.txt" -g1 "dram_free" "dram_used" "dram_size" "dram_cap" -o
-  # "${app_dir}/dram_stats" ./venv/bin/python
+  # "${app_dir}/stats.txt" -g1 "fast_free" "fast_used" "fast_size" "fast_cap" -o
+  # "${app_dir}/fast_stats" ./venv/bin/python
   # "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" -f "${app_dir}/stats.txt" -g1
-  # "dram_accesses" "rem_accesses" -o "${app_dir}/accesses" ./venv/bin/python
+  # "fast_accesses" "slow_accesses" -o "${app_dir}/accesses" ./venv/bin/python
   # "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" -f "${app_dir}/stats.txt" -g1
-  # "percent_dram" -o "${app_dir}/percent" ./venv/bin/python
+  # "percent_fast" -o "${app_dir}/percent" ./venv/bin/python
   # "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" -f "${app_dir}/stats.txt" -g1
   # "internal_mem_overhead" -g2 "mem_allocated" -o "${app_dir}/mem"
   # ./venv/bin/python "${PLOT_SCRIPTS_DIR}/plot_stats_mul.py" -f
@@ -198,7 +198,7 @@ run_pagr_hem() {
 
   local app_dir="${result_dir}"
 
-  run_make cluster_algo=0 hem_algo=0 dfs_algo=0 lru_algo=0 dram_size=32212254720 \
+  run_make cluster_algo=0 hem_algo=0 dfs_algo=0 lru_algo=0 fast_size=32212254720 \
     sample_period=$period record=$record
   run_app "bc-local-${app}" "${GAPBS_DIR}" "./bc" -f "twitter-2010.sg" -n 64 -r 0
   run_app "resnet-local-${app}" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
@@ -293,19 +293,19 @@ echo never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
 
 # run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
 #   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
-#   max_neighbors=8 bfs_algo=0 dfs_algo=1 dram_buffer=1073741824
+#   max_neighbors=8 bfs_algo=0 dfs_algo=1 fast_buffer=1073741824
 # run_app "resnet-PAGR" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
 
 
 echo always | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
 echo always | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
 
-# run_make cluster_algo=0 hem_algo=1 dfs_algo=0 dram_buffer=1073741824
+# run_make cluster_algo=0 hem_algo=1 dfs_algo=0 fast_buffer=1073741824
 # run_app "cgups-hem" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
 run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
-  max_neighbors=8 bfs_algo=0 dfs_algo=1 dram_buffer=1073741824
+  max_neighbors=8 bfs_algo=0 dfs_algo=1 fast_buffer=1073741824
 run_app "cgups-PAGR" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
 #resnet current best

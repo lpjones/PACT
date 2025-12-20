@@ -83,7 +83,7 @@ enum {
 
 
 enum pbuftype {
-  DRAMREAD = 0,
+  FASTREAD = 0,
   REMREAD = 1,  
   NPBUFTYPES
 };
@@ -98,12 +98,11 @@ struct pebs_rec {
 
 struct pebs_stats {
     uint64_t throttles, unthrottles;
-    uint64_t local_accesses, remote_accesses;
     uint64_t internal_mem_overhead, mem_allocated;
     uint64_t unknown_samples;
     uint64_t wrapped_records;
     uint64_t wrapped_headers;
-    uint64_t dram_accesses, rem_accesses;
+    uint64_t fast_accesses, slow_accesses;
     uint64_t promotions, demotions;
     uint64_t pebs_resets;
     uint64_t non_tracked_mem;

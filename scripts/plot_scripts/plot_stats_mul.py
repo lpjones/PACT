@@ -10,10 +10,10 @@ Now supports multiple input files and plots the same metrics from each file
 on the same axes.
 
 Usage examples:
-  ./plot_stats_sparse.py -f stats1.txt stats2.txt -g1 dram_free dram_used dram_size
-  ./plot_stats_sparse.py -f stats1.txt stats2.txt -g1 dram_free -g2 wrapped_records -o out.pdf
-  cat stats.txt | ./plot_stats_sparse.py -g1 dram_free
-  ./plot_stats_sparse.py -f stats.txt -g1 dram_free --start-percent 10 --end-percent 50
+  ./plot_stats_sparse.py -f stats1.txt stats2.txt -g1 fast_free fast_used fast_size
+  ./plot_stats_sparse.py -f stats1.txt stats2.txt -g1 fast_free -g2 wrapped_records -o out.pdf
+  cat stats.txt | ./plot_stats_sparse.py -g1 fast_free
+  ./plot_stats_sparse.py -f stats.txt -g1 fast_free --start-percent 10 --end-percent 50
 
 Options:
   -f/--file    input files (default stdin if omitted)

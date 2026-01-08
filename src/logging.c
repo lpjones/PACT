@@ -6,6 +6,7 @@ FILE* time_fp = NULL;
 FILE* pred_fp = NULL;
 FILE* mig_fp = NULL;
 FILE* cold_fp = NULL;
+FILE* neigh_fp = NULL;
 struct timespec log_start_time;
 
 void init_log_files() {
@@ -31,6 +32,9 @@ void init_log_files() {
 
     cold_fp = fopen("cold.bin", "wb");
     assert(cold_fp != NULL);
+
+    neigh_fp = fopen("neigh.txt", "w");
+    assert(neigh_fp != NULL);
 #endif
     internal_call = false;
 

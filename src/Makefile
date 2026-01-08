@@ -13,6 +13,7 @@ hem_algo ?= 0
 lru_algo ?= 0
 bfs_algo ?= 0
 dfs_algo ?= 0
+all_algo ?= 0
 his_size ?= 16
 pred_depth ?= 16
 dec_down ?= 0.0001
@@ -30,6 +31,7 @@ CFLAGS += -DCLUSTER_ALGO=$(cluster_algo)
 CFLAGS += -DHEM_ALGO=$(hem_algo)
 CFLAGS += -DBFS_ALGO=$(bfs_algo)
 CFLAGS += -DDFS_ALGO=$(dfs_algo)
+CFLAGS += -DALL_ALGO=$(all_algo)
 
 CFLAGS += -DHISTORY_SIZE=$(his_size)
 CFLAGS += -DMAX_PRED_DEPTH=$(pred_depth)

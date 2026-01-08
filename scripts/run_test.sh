@@ -85,6 +85,7 @@ run_app() {
   mv -f preds.bin "${app_dir}"
   mv -f mig.bin "${app_dir}"
   mv -f cold.bin "${app_dir}"
+  mv -f neigh.txt "${app_dir}"
 
 
   cd "${ORIG_PWD}"
@@ -291,22 +292,24 @@ run_sample_period() {
 echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
 echo never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
 
-# run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
-#   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
-#   max_neighbors=8 bfs_algo=0 dfs_algo=1 fast_buffer=1073741824
-# run_app "resnet-PAGR" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
+run_make cluster_algo=1 hem_algo=0 \
+  his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
+  max_neighbors=8 bfs_algo=0 dfs_algo=1 fast_buffer=33554432 sample_period=12800 record=0
+run_app "resnet-PAGR1" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
 
 
 echo always | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
 echo always | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
 
+# run_make cluster_algo=0 hem_algo=1 dfs_algo=0 fast_buffer=0 fast_size=2147483648
+# run_make cluster_algo=1 hem_algo=0 dfs_algo=1 all_algo=0 fast_buffer=1073741824 lru_algo=1 sample_period=100
 # run_make cluster_algo=0 hem_algo=1 dfs_algo=0 fast_buffer=1073741824
-# run_app "cgups-hem" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
+# run_app "cgups-PAGR" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
-run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
-  his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
-  max_neighbors=8 bfs_algo=0 dfs_algo=1 fast_buffer=1073741824
-run_app "cgups-PAGR" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
+# run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
+#   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
+#   max_neighbors=8 bfs_algo=0 dfs_algo=1 fast_buffer=1073741824
+# run_app "cgups-PAGR" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
 #resnet current best
 

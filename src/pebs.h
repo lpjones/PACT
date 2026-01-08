@@ -42,8 +42,12 @@
     #define PEBS_STATS_CPU 4
 #endif
 
-#ifndef MIGRATE_CPU
-    #define MIGRATE_CPU 6
+#ifndef PROMOTE_CPU
+    #define PROMOTE_CPU 6
+#endif
+
+#ifndef DEMOTE_CPU
+    #define DEMOTE_CPU 8
 #endif
 
 #ifndef SAMPLE_PERIOD
@@ -77,7 +81,8 @@
 enum {
     PEBS_THREAD,
     PEBS_STATS_THREAD,
-    MIGRATE_THREAD,
+    PROMOTE_THREAD,
+    DEMOTE_THREAD,
     NUM_INTERNAL_THREADS
 };
 

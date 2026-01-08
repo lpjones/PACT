@@ -50,5 +50,7 @@ int main(int argc, char** argv) {
 
     // numa_set_preferred(node);
     // mmap(NULL, eat_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE, -1, 0);
-    while (1);
+    while (1) {
+        sleep(1);
+    }
 }

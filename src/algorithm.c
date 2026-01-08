@@ -27,6 +27,10 @@
 #define DEC_DIST 0.0001
 #endif
 
+#ifndef NEIGHBOR_DEC
+#define NEIGHBOR_DEC 1.1
+#endif
+
 
 
 struct pact_page *page_history[HISTORY_SIZE];
@@ -114,7 +118,7 @@ static double calc_distance(struct pact_page *a, struct pact_page *b) {
 static void update_neighbors(struct pact_page *old_page) {
     // cool neighbors
     for (uint32_t i = 0; i < MAX_NEIGHBORS; i++) {
-        old_page->neighbors[i].distance *= 1.01;
+        old_page->neighbors[i].distance *= NEIGHBOR_DEC;
     }
 
     for (uint32_t i = 0; i < HISTORY_SIZE; i++) {
@@ -158,12 +162,16 @@ static void update_neighbors(struct pact_page *old_page) {
         }
         
     }
-    // printf("Neighbors:\t");
-    // for (uint32_t i = 0; i < MAX_NEIGHBORS; i++) {
-    //     if (old_page->neighbors[i].page != NULL)
-    //         printf("0x%lx, ", old_page->neighbors[i].page->va);
-    // }
-    // printf("\n");
+    
+}
+
+void print_neighbors(struct pact_page *page, double time) {
+    LOG_NEIGHBOR("[%.9f]\t 0x%lx Neighbors:\t", time, page->va);
+    for (uint32_t i = 0; i < MAX_NEIGHBORS; i++) {
+        if (page->neighbors[i].page != NULL)
+            LOG_NEIGHBOR("0x%lx, ", page->neighbors[i].page->va);
+    }
+    LOG_NEIGHBOR("\n");
 }
 
 void algo_add_page(struct pact_page *page) {
@@ -171,6 +179,7 @@ void algo_add_page(struct pact_page *page) {
     // then replace it with the new page
 
     // find oldest page O(HISTORY_SIZE)
+    static double time_elapsed = 0;
     struct pact_page *old_page = page_history[page_his_idx];
     uint32_t old_idx = page_his_idx;
 
@@ -191,6 +200,12 @@ void algo_add_page(struct pact_page *page) {
     // LOG_DEBUG("ALGO: oldest page: 0x%lx\n", old_page->va);
 
     update_neighbors(old_page);
+    double time_tmp = elapsed_time(log_start_time, get_time());
+
+    if (time_tmp - time_elapsed >= 0.1) { // every 1 second prints neighbors of a page
+        print_neighbors(old_page, time_tmp);
+        time_elapsed = time_tmp;
+    }
 
     page_history[old_idx] = page;
     
@@ -237,6 +252,13 @@ void algo_predict_pages(struct pact_page *page, struct pact_page **pred_pages, u
     // double threshold = avg_dist / 4000;
     // LOG_DEBUG("Threshold: %.2e, avg_dist: %.2e\n", bot_dist, avg_dist);
     double threshold = bot_dist;
+#if ALL_ALGO == 1
+    for (uint32_t i = 0; i < MAX_NEIGHBORS; i++) {
+        if (page->neighbors[i].distance != 0) {
+            pred_pages[(*idx)++] = page->neighbors[i].page;
+        }
+    }
+#endif
 
 #if DFS_ALGO == 1
     // DFS

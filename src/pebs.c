@@ -149,16 +149,7 @@ void* pebs_stats_thread() {
         pebs_stats.pebs_resets = 0;
         
 
-#if FAST_BUFFER != 0
-        // hacky way to update fast_used every second in case there's drift over time
-        fast_size = numa_node_size(FAST_NODE, &fast_free);
-        fast_used = fast_size - fast_free;
-        fast_size -= FAST_BUFFER;
 
-        long slow_free;
-        long slow_size = numa_node_size(REM_NODE, &slow_free);
-        slow_used = slow_size - slow_free;
-#endif
     }
     return NULL;
 }
@@ -373,20 +364,20 @@ void process_perf_buffer(int cpu_idx, int evt) {
         }
 
         // Sample based cooling
-        // samples_since_cool++;
-        // if (samples_since_cool >= SAMPLE_COOLING_THRESHOLD) {
-        //     global_clock++;
-        //     samples_since_cool = 0;
-        //     // printf("cyc since last cool: %lu\n", cur_cyc - last_cyc_cool);
-        //     last_cyc_cool = rdtscp();
-        // }
+        samples_since_cool++;
+        if (samples_since_cool >= SAMPLE_COOLING_THRESHOLD) {
+            global_clock++;
+            samples_since_cool = 0;
+            // printf("cyc since last cool: %lu\n", cur_cyc - last_cyc_cool);
+            last_cyc_cool = rdtscp();
+        }
 
         // Time based cooling
-        if (cur_cyc - last_cyc_cool > CYC_COOL_THRESHOLD) {
-            // __atomic_fetch_add(&global_clock, 1, __ATOMIC_RELEASE);
-            global_clock++;
-            last_cyc_cool = cur_cyc;
-        }
+        // if (cur_cyc - last_cyc_cool > CYC_COOL_THRESHOLD) {
+        //     // __atomic_fetch_add(&global_clock, 1, __ATOMIC_RELEASE);
+        //     global_clock++;
+        //     last_cyc_cool = cur_cyc;
+        // }
 
 #endif 
 
@@ -481,7 +472,7 @@ void pact_migrate_page(struct pact_page *page, int node) {
 
     if (mbind(page->va_start, page->size, MPOL_BIND, &nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
         perror("mbind");
-        printf("mbind failed %p\n", page->va_start);
+        LOG_DEBUG("mbind failed %p\n", page->va_start);
     } else {
         page->migrated = true;
         if (node == FAST_NODE) {
@@ -522,77 +513,30 @@ void pact_migrate_page(struct pact_page *page, int node) {
         }
     }
 }
-
-
-void *migrate_thread() {
+void *demote_thread() {
     internal_call = true;
-
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
-    CPU_SET(MIGRATE_CPU, &cpuset);
-    int s = pthread_setaffinity_np(internal_threads[MIGRATE_THREAD], sizeof(cpu_set_t), &cpuset);
+    CPU_SET(PROMOTE_CPU, &cpuset);
+    int s = pthread_setaffinity_np(internal_threads[DEMOTE_THREAD], sizeof(cpu_set_t), &cpuset);
     assert(s == 0);
-    // uint64_t num_loops = 0;
 
-    struct pact_page *hot_page, *cold_page;
-    uint64_t cold_bytes = 0;
 
     while (true) {
-        // CHECK_KILLED(MIGRATE_THREAD);
+#if FAST_BUFFER != 0
+        // hacky way to update fast_used every second in case there's drift over time
+        fast_size = numa_node_size(FAST_NODE, &fast_free);
+        fast_used = fast_size - fast_free;
+        fast_size -= FAST_BUFFER;
 
-        // Don't do any migrations until hot page comes in
-        hot_page = dequeue_fifo(&hot_list);
-        if (hot_page == NULL) continue;
-        pthread_mutex_lock(&hot_page->page_lock);
-
-        assert(hot_page != NULL);
-        if (hot_page->list != NULL || hot_page->in_fast == IN_FAST) {
-            pthread_mutex_unlock(&hot_page->page_lock);
-            continue;
-        }
-        
-        LOG_DEBUG("MIG: got hot page: 0x%lx\n", hot_page->va);
-
-        uint64_t mig_queue_cyc = rdtscp();
-        uint64_t mig_queue_diff = mig_queue_cyc - hot_page->mig_start;
-        mig_queue_time = DEC_MIG_TIME * mig_queue_diff + (1.0 - DEC_MIG_TIME) * mig_queue_time;
-
-        // have a valid hot page. Now get cold pages
-        // disable fast mmap temporarily
-        atomic_store_explicit(&fast_lock, true, memory_order_release);
-        uint64_t bytes_free = fast_size - __atomic_load_n(&fast_used, __ATOMIC_ACQUIRE);
-
-        if (bytes_free >= hot_page->size) {
-            LOG_DEBUG("MIG: enough fast: 0x%lx\n", hot_page->va);
-            // Enough space in fast, just migrate hot page
-            // pact_migrate_pages(&hot_page, 1, FAST_NODE);
-            pact_migrate_page(hot_page, FAST_NODE);
-            // hot_page->migrated = true;
-            // pebs_stats.promotions++;
-            
-            __atomic_fetch_add(&fast_used, hot_page->size, __ATOMIC_RELEASE);
-            atomic_store_explicit(&fast_lock, false, memory_order_release);
-            LOG_DEBUG("MIG: Finished migration: 0x%lx\n", hot_page->va);
-            uint64_t mig_move_diff = rdtscp() - mig_queue_cyc;
-            mig_move_time = DEC_MIG_TIME * mig_move_diff + (1.0 - DEC_MIG_TIME) * mig_move_time;
-
-            pthread_mutex_unlock(&hot_page->page_lock);
-            continue;
-        }
-
-        cold_bytes = 0;
-        // Not enough space in fast, demote cold pages until enough space
-        while (bytes_free + cold_bytes < hot_page->size) {
-            cold_page = dequeue_fifo(&cold_list);
+        long slow_free;
+        long slow_size = numa_node_size(REM_NODE, &slow_free);
+        slow_used = slow_size - slow_free;
+#endif
+        int bytes_demoted = 0;
+        while (fast_free + bytes_demoted < FAST_BUFFER) {
+            struct pact_page *cold_page = dequeue_fifo(&cold_list);
             if (cold_page == NULL) {
-                // cold list is empty, abort
-                // enqueue_fifo(&hot_list, hot_page);
-                pthread_mutex_unlock(&hot_page->page_lock);
-
-                // enable fast mmap with updated fast_used
-                __atomic_fetch_sub(&fast_used, cold_bytes, __ATOMIC_RELEASE);
-                atomic_store_explicit(&fast_lock, false, memory_order_release);
-
                 LOG_DEBUG("MIG: no cold pages, aborting\n");
                 break;
             }
@@ -614,13 +558,46 @@ void *migrate_thread() {
             // pact_migrate_pages(&cold_page, 1, REM_NODE);
             pact_migrate_page(cold_page, REM_NODE);
             cold_page->migrated = true;
-            cold_bytes += cold_page->size;
+            bytes_demoted += cold_page->size;
             LOG_DEBUG("MIG: demoted 0x%lx\n", cold_page->va);
             pthread_mutex_unlock(&cold_page->page_lock);
-            // pebs_stats.demotions++;
         }
-        if (cold_page == NULL) continue;
-        // now enough space in fast
+        sleep(0.01);
+    }
+    return NULL;
+}
+
+void *promote_thread() {
+    internal_call = true;
+
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(PROMOTE_CPU, &cpuset);
+    int s = pthread_setaffinity_np(internal_threads[PROMOTE_THREAD], sizeof(cpu_set_t), &cpuset);
+    assert(s == 0);
+    // uint64_t num_loops = 0;
+
+    struct pact_page *hot_page, *cold_page;
+    uint64_t cold_bytes = 0;
+
+    while (true) {
+        // Don't do any migrations until hot page comes in
+        hot_page = dequeue_fifo(&hot_list);
+        if (hot_page == NULL) continue;
+        pthread_mutex_lock(&hot_page->page_lock);
+
+        assert(hot_page != NULL);
+        if (hot_page->list != NULL || hot_page->in_fast == IN_FAST) {
+            pthread_mutex_unlock(&hot_page->page_lock);
+            continue;
+        }
+        
+        LOG_DEBUG("MIG: got hot page: 0x%lx\n", hot_page->va);
+
+        uint64_t mig_queue_cyc = rdtscp();
+        uint64_t mig_queue_diff = mig_queue_cyc - hot_page->mig_start;
+        mig_queue_time = DEC_MIG_TIME * mig_queue_diff + (1.0 - DEC_MIG_TIME) * mig_queue_time;
+
         LOG_DEBUG("MIG: now enough space: 0x%lx\n", hot_page->va);
         // pact_migrate_pages(&hot_page, 1, FAST_NODE);
         pact_migrate_page(hot_page, FAST_NODE);
@@ -644,8 +621,13 @@ void start_pebs_thread() {
     assert(s == 0);
 }
 
-void start_migrate_thread() {
-    int s = pthread_create(&internal_threads[MIGRATE_THREAD], NULL, migrate_thread, NULL);
+void start_promote_thread() {
+    int s = pthread_create(&internal_threads[PROMOTE_THREAD], NULL, promote_thread, NULL);
+    assert(s == 0);
+}
+
+void start_demote_thread() {
+    int s = pthread_create(&internal_threads[DEMOTE_THREAD], NULL, demote_thread, NULL);
     assert(s == 0);
 }
 
@@ -679,7 +661,9 @@ void pebs_init(void) {
 
     start_pebs_thread();
 
-    start_migrate_thread();
+    start_promote_thread();
+
+    start_demote_thread();
 
     internal_call = false;
 }

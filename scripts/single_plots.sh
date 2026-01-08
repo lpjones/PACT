@@ -31,6 +31,10 @@ run_app() {
   #   -g1 "fast_free" "fast_used" "fast_size" "fast_cap" \
   #   --labels "" \
   #   -o "${app_dir}/fast_stats"
+  $py_bin "${PLOT_SCRIPTS_DIR}/plot_cgups_mul.py" \
+    "${app_dir}/app.txt" \
+    "${app_dir}/throughput.png" \
+    --title "GUPS Throughput"
 
   $py_bin "${PLOT_SCRIPTS_DIR}/plot_stats.py" \
     "${app_dir}/stats.txt" \
@@ -142,7 +146,7 @@ run_app() {
 }
 
 # run_app bfs-hem-2GB-100
-run_app cgups-PAGR
+run_app resnet-PAGR1
 
 # % modify plots to start y-axis at 0
 # % add references to end of background bibtex

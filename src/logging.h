@@ -12,6 +12,7 @@ extern FILE* time_fp;
 extern FILE* pred_fp;
 extern FILE* mig_fp;
 extern FILE* cold_fp;
+extern FILE* neigh_fp;
 extern struct timespec log_start_time;
 
 // #define LOG_DEBUG(...) { fprintf(debug_fp, __VA_ARGS__); fflush(debug_fp); }
@@ -21,8 +22,11 @@ extern struct timespec log_start_time;
     fprintf(debug_fp, __VA_ARGS__);                                          \
     fflush(debug_fp);                                                        \
 }
+
+#define LOG_NEIGHBOR(...) { fprintf(neigh_fp, __VA_ARGS__); fflush(neigh_fp); }
 #else
 #define LOG_DEBUG(...)
+#define LOG_NEIGHBOR(...)
 #endif
 
 #if PEBS_STATS == 1

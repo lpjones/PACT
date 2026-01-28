@@ -74,6 +74,7 @@ run_app() {
   # "${stderr_file}"
   cd "${work_dir}"
   sudo numactl -N0 env LD_PRELOAD="${PRELOAD}" "${cmd[@]}" > "${stdout_file}" 2> "${stderr_file}"
+  # gdb --args sudo numactl -N0 env LD_PRELOAD="${PRELOAD}" "${cmd[@]}"
   
   local rc=$?
 
@@ -194,47 +195,48 @@ run_pagr_hem() {
   local app=$1
   local period=$2
   local record=$3
+  local f_buf=1073741824
   echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
   echo never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
 
   local app_dir="${result_dir}"
 
-  run_make cluster_algo=0 hem_algo=0 dfs_algo=0 lru_algo=0 fast_size=32212254720 \
-    sample_period=$period record=$record
-  run_app "bc-local-${app}" "${GAPBS_DIR}" "./bc" -f "twitter-2010.sg" -n 64 -r 0
-  run_app "resnet-local-${app}" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
+  # run_make cluster_algo=0 hem_algo=0 dfs_algo=0 lru_algo=0 \
+  #   sample_period=$period record=$record
+  # run_app "bc-local-${app}" "${GAPBS_DIR}" "./bc" -g 27 -n 64 -r 0
+  # run_app "resnet-local-${app}" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
 
-  echo always | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
-  echo always | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+  # echo always | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
+  # echo always | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
 
-  run_app "cgups-local-${app}" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
+  # run_app "cgups-local-${app}" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
-  echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
-  echo never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+  # echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
+  # echo never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
 
-  run_app "bfs-local-${app}" "${GAPBS_DIR}" "./bfs" -f "twitter-2010.sg" -n 64 -r 0
-  run_app "stream-local-${app}" "${STREAM_DIR}" "./stream" 2048 50
+  # run_app "bfs-local-${app}" "${GAPBS_DIR}" "./bfs" -g 27 -n 64 -r 0
+  # run_app "stream-local-${app}" "${STREAM_DIR}" "./stream" 12288 100
 
   # Resnet  
   run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
     his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
     max_neighbors=8 bfs_algo=0 dfs_algo=1 lru_algo=1 sample_period=$period \
-    record=$record
+    record=$record fast_buffer=$f_buf
   run_app "resnet-PAGR-${app}" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
 
   run_make cluster_algo=0 hem_algo=1 dfs_algo=0 sample_period=$period \
-    record=$record
+    record=$record fast_buffer=$f_buf
   run_app "resnet-hem-${app}" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
 
   echo always | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
   echo always | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
   # CGUPS
   run_make cluster_algo=1 hem_algo=0 dfs_algo=1 lru_algo=1 \
-    dec_down=0.0001 dec_up=0.01 sample_period=$period record=$record
+    dec_down=0.0001 dec_up=0.01 sample_period=$period record=$record fast_buffer=$f_buf
   run_app "cgups-PAGR-${app}" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
   run_make cluster_algo=0 hem_algo=1 dfs_algo=0 lru_algo=0 sample_period=$period \
-    record=$record
+    record=$record fast_buffer=$f_buf
   run_app "cgups-hem-${app}" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
   echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
@@ -244,33 +246,33 @@ run_pagr_hem() {
   run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
     his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
     max_neighbors=8 dfs_algo=1 lru_algo=1 sample_period=$period \
-    record=$record
-  run_app "bfs-PAGR-${app}" "${GAPBS_DIR}" "./bfs" -f "twitter-2010.sg" -n 64 -r 0
+    record=$record fast_buffer=$f_buf
+  run_app "bfs-PAGR-${app}" "${GAPBS_DIR}" "./bfs" -g 26 -n 64 -r 0
 
   run_make cluster_algo=0 hem_algo=1 dfs_algo=0 sample_period=$period \
-    record=$record
-  run_app "bfs-hem-${app}" "${GAPBS_DIR}" "./bfs" -f "twitter-2010.sg" -n 64 -r 0
+    record=$record fast_buffer=$f_buf
+  run_app "bfs-hem-${app}" "${GAPBS_DIR}" "./bfs" -g 26 -n 64 -r 0
 
   # Stream
   run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
     his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
     max_neighbors=8 dfs_algo=1 lru_algo=1 sample_period=$period \
-    record=$record
+    record=$record fast_buffer=$f_buf
   run_app "stream-PAGR-${app}" "${STREAM_DIR}" "./stream" 2048 50
 
   run_make cluster_algo=0 hem_algo=1 sample_period=$period \
-    record=$record
+    record=$record fast_buffer=$f_buf
   run_app "stream-hem-${app}" "${STREAM_DIR}" "./stream" 2048 50
 
   # BC
   run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
     his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
     max_neighbors=8 dfs_algo=1 lru_algo=1 sample_period=$period \
-    record=$record
+    record=$record fast_buffer=$f_buf
   run_app "bc-PAGR-${app}" "${GAPBS_DIR}" "./bc" -f "twitter-2010.sg" -n 64 -r 0
 
   run_make cluster_algo=0 hem_algo=1 dfs_algo=0 sample_period=$period \
-    record=$record
+    record=$record fast_buffer=$f_buf
   run_app "bc-hem-${app}" "${GAPBS_DIR}" "./bc" -f "twitter-2010.sg" -n 64 -r 0
 
   rm -f make_config.txt
@@ -286,20 +288,90 @@ run_sample_period() {
 }
 # run_sample_period 100 #200 400 800 1600 3200 6400 12800 25600 51200 102400
 # run_pagr_hem 2GB
-
+# run_pagr_hem 1 100 1
 # grid_search
 
-echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
-echo never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+f_buf=536870912
+record=1
+period=100
+app="128"
 
-run_make cluster_algo=1 hem_algo=0 \
-  his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
-  max_neighbors=8 bfs_algo=0 dfs_algo=1 fast_buffer=33554432 sample_period=12800 record=0
-run_app "resnet-PAGR1" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
+# Resnet  
+run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
+  bfs_algo=0 dfs_algo=1 lru_algo=1 sample_period=$period \
+  record=$record fast_buffer=$f_buf
+# run_app "resnet-PAGR-${app}" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
+run_app "resnet_tf-PAGR-${app}" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train_tf.py"
+# ./single_plots "resnet-PAGR-${app}"
+
+# run_app "cgups-PAGR-${app}" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
+# ./single_plots "cgups-PAGR-${app}"
+
+# run_app "bfs-PAGR-${app}" "${GAPBS_DIR}" "./bfs" -g 27 -n 64 -r 0
+# ./single_plots "bfs-PAGR-${app}"
+
+# run_make cluster_algo=0 hem_algo=1 dfs_algo=0 sample_period=$period \
+#   record=$record fast_buffer=$f_buf
+# run_app "resnet-hem-${app}" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
+
+# echo always | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
+# echo always | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+# # CGUPS
+# run_make cluster_algo=1 hem_algo=0 dfs_algo=1 lru_algo=1 \
+#   dec_down=0.0001 dec_up=0.01 sample_period=$period record=$record fast_buffer=$f_buf
+# run_app "cgups-PAGR-${app}" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
+
+# run_make cluster_algo=0 hem_algo=1 dfs_algo=0 lru_algo=0 sample_period=$period \
+#   record=$record fast_buffer=$f_buf
+# run_app "cgups-hem-${app}" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
+
+# echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
+# echo never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+
+# BFS
+# run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
+#   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
+#   max_neighbors=8 dfs_algo=1 lru_algo=1 sample_period=$period \
+#   record=$record fast_buffer=$f_buf
+# run_app "bfs-PAGR-${app}" "${GAPBS_DIR}" "./bfs" -g 27 -n 64 -r 0
+
+# run_make cluster_algo=0 hem_algo=1 dfs_algo=0 sample_period=$period \
+#   record=$record fast_buffer=$f_buf
+# run_app "bfs-hem-${app}" "${GAPBS_DIR}" "./bfs" -g 27 -n 64 -r 0
+
+# # Stream
+# run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
+#   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
+#   max_neighbors=8 dfs_algo=1 lru_algo=1 sample_period=$period \
+#   record=$record fast_buffer=$f_buf
+# run_app "stream-PAGR-${app}" "${STREAM_DIR}" "./stream" 16384 50
+
+# run_make cluster_algo=0 hem_algo=1 sample_period=$period \
+#   record=$record fast_buffer=$f_buf
+# run_app "stream-hem-${app}" "${STREAM_DIR}" "./stream" 16384 50
+
+# # BC
+# run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
+#   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
+#   max_neighbors=8 dfs_algo=1 lru_algo=1 sample_period=$period \
+#   record=$record fast_buffer=$f_buf
+# run_app "bc-PAGR-${app}" "${GAPBS_DIR}" "./bc" -g 27 -n 64 -r 0
+
+# run_make cluster_algo=0 hem_algo=1 dfs_algo=0 sample_period=$period \
+#   record=$record fast_buffer=$f_buf
+# run_app "bc-hem-${app}" "${GAPBS_DIR}" "./bc" -g 27 -n 64 -r 0
+
+# echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
+# echo never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+
+# run_make cluster_algo=1 hem_algo=0 \
+#   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
+#   max_neighbors=8 bfs_algo=0 dfs_algo=1 fast_buffer=33554432 sample_period=12800 record=0
+# run_app "resnet-PAGR1" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
 
 
-echo always | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
-echo always | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+# echo always | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
+# echo always | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
 
 # run_make cluster_algo=0 hem_algo=1 dfs_algo=0 fast_buffer=0 fast_size=2147483648
 # run_make cluster_algo=1 hem_algo=0 dfs_algo=1 all_algo=0 fast_buffer=1073741824 lru_algo=1 sample_period=100

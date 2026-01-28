@@ -31,10 +31,26 @@ run_app() {
   #   -g1 "fast_free" "fast_used" "fast_size" "fast_cap" \
   #   --labels "" \
   #   -o "${app_dir}/fast_stats"
-  $py_bin "${PLOT_SCRIPTS_DIR}/plot_cgups_mul.py" \
-    "${app_dir}/app.txt" \
-    "${app_dir}/throughput.png" \
-    --title "GUPS Throughput"
+  if [[ "$config" == *"cgups"* ]]; then
+    $py_bin "${PLOT_SCRIPTS_DIR}/plot_cgups_mul.py" \
+      "${app_dir}/app.txt" \
+      "${app_dir}/throughput.png" \
+      --title "GUPS Throughput"
+  fi
+
+  if [[ "$config" == *"resnet"* ]]; then
+    $py_bin "${PLOT_SCRIPTS_DIR}/plot_resnet.py" \
+      "${app_dir}/app.txt" \
+      "${app_dir}/resnet.png" \
+      --title "ResNet50 Im/Sec"
+  fi
+
+  if [[ "$config" == *"bfs"* || "$config" == *"bc"* ]]; then
+    $py_bin "${PLOT_SCRIPTS_DIR}/plot_gapbs_mul.py" \
+      "${app_dir}/app.txt" \
+      "${app_dir}/trials.png" \
+      --title "Trial Times"
+  fi
 
   $py_bin "${PLOT_SCRIPTS_DIR}/plot_stats.py" \
     "${app_dir}/stats.txt" \
@@ -146,7 +162,7 @@ run_app() {
 }
 
 # run_app bfs-hem-2GB-100
-run_app resnet-PAGR1
+run_app $1
 
 # % modify plots to start y-axis at 0
 # % add references to end of background bibtex

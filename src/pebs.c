@@ -1,9 +1,5 @@
 #include "pebs.h"
 
-// #define CHECK_KILLED(thread) if (!(num_loops++ & 0xFFFF) && killed(thread)) return NULL;
-#define CHECK_KILLED(thread) 
-
-
 // Public variables
 
 
@@ -32,34 +28,6 @@ struct perf_sample {
 
 
 struct pebs_stats pebs_stats = {0};
-
-
-void wait_for_threads() {
-    for (int i = 0; i < NUM_INTERNAL_THREADS; i++) {
-        void *ret;
-        pthread_join(internal_threads[i], &ret);
-    }
-    LOG_DEBUG("Internal threads killed\n");
-}
-
-void pebs_cleanup() {
-    
-}
-
-static inline void kill_thread(uint8_t thread) {
-    atomic_store(&kill_internal_threads[thread], true);
-}
-
-void kill_threads() {
-    LOG_DEBUG("Killing threads\n");
-    for (int i = 0; i < NUM_INTERNAL_THREADS; i++) {
-        kill_thread(i);
-    }
-}
-
-static inline bool killed(uint8_t thread) {
-    return atomic_load(&kill_internal_threads[thread]);
-}
 
 static inline long perf_event_open(struct perf_event_attr *hw_event, pid_t pid, int cpu, int group_fd, unsigned long flags) {
     int ret;
@@ -103,6 +71,7 @@ static struct perf_event_mmap_page* perf_setup(__u64 config, __u64 config1, uint
     return p;
 }
 
+#if PEBS_STATS == 1
 void* pebs_stats_thread() {
     internal_call = true;
 
@@ -113,7 +82,7 @@ void* pebs_stats_thread() {
     assert(s == 0);
 
 
-    while (!killed(PEBS_STATS_THREAD)) {
+    while (true) {
         sleep(1);
         LOG_STATS("internal_mem_overhead: [%lu]\tpact_allocated: [%lu]\tthrottles: [%lu]\tunthrottles: [%lu]\tunknown_samples: [%lu]\n", 
                 pebs_stats.internal_mem_overhead, pebs_stats.mem_allocated, pebs_stats.throttles, pebs_stats.unthrottles, pebs_stats.unknown_samples)
@@ -153,11 +122,14 @@ void* pebs_stats_thread() {
     }
     return NULL;
 }
+#endif
 
+#if PEBS_STATS == 1
 static void start_pebs_stats_thread() {
     int s = pthread_create(&internal_threads[PEBS_STATS_THREAD], NULL, pebs_stats_thread, NULL);
     assert(s == 0);
 }
+#endif
 
 // Could be munmapped at any time
 void make_hot_request(struct pact_page* page) {
@@ -254,6 +226,7 @@ void make_cold_request(struct pact_page* page) {
     pthread_mutex_unlock(&page->page_lock);
 }
 static uint64_t samples_since_cool = 0;
+static uint64_t sample_since_pred = 0;
 
 void process_perf_buffer(int cpu_idx, int evt) {
     struct perf_event_mmap_page *p = perf_page[cpu_idx][evt];
@@ -386,8 +359,8 @@ void process_perf_buffer(int cpu_idx, int evt) {
         
 #if CLUSTER_ALGO == 1
         algo_add_page(page);
-        
         if (cold_list.numentries != 0) {
+            sample_since_pred = 0;
             struct pact_page *pred_pages[MAX_NEIGHBORS * MAX_PRED_DEPTH];
             uint32_t idx = 0;
             algo_predict_pages(page, pred_pages, &idx);
@@ -452,7 +425,6 @@ void* pebs_scan_thread() {
 
     
     while (true) {
-        CHECK_KILLED(PEBS_THREAD);
 
         int pebs_start_cpu = 0;
         int num_cores = PEBS_NPROCS;
@@ -463,7 +435,6 @@ void* pebs_scan_thread() {
             }
         }
     }
-    pebs_cleanup();
     return NULL;
 }
 
@@ -562,7 +533,7 @@ void *demote_thread() {
             LOG_DEBUG("MIG: demoted 0x%lx\n", cold_page->va);
             pthread_mutex_unlock(&cold_page->page_lock);
         }
-        sleep(0.01);
+        // sleep(0.01);
     }
     return NULL;
 }
@@ -598,15 +569,8 @@ void *promote_thread() {
         uint64_t mig_queue_diff = mig_queue_cyc - hot_page->mig_start;
         mig_queue_time = DEC_MIG_TIME * mig_queue_diff + (1.0 - DEC_MIG_TIME) * mig_queue_time;
 
-        LOG_DEBUG("MIG: now enough space: 0x%lx\n", hot_page->va);
-        // pact_migrate_pages(&hot_page, 1, FAST_NODE);
         pact_migrate_page(hot_page, FAST_NODE);
-        // hot_page->migrated = true;
-        // pebs_stats.promotions++;
 
-        // enable fast mmap
-        __atomic_fetch_add(&fast_used, hot_page->size - cold_bytes, __ATOMIC_RELEASE);
-        atomic_store_explicit(&fast_lock, false, memory_order_release);
         LOG_DEBUG("MIG: Finished migration: 0x%lx\n", hot_page->va);
 
         uint64_t mig_move_diff = rdtscp() - mig_queue_cyc;
@@ -661,9 +625,10 @@ void pebs_init(void) {
 
     start_pebs_thread();
 
+#if HEM_ALGO == 1 || CLUSTER_ALGO == 1
     start_promote_thread();
 
     start_demote_thread();
-
+#endif
     internal_call = false;
 }

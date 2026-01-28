@@ -225,7 +225,10 @@ def plot_clusters(cluster_cycles, cluster_addresses, cluster_cpus, cluster_ips, 
             cmin = cycles.min()
             cmax = cycles.max()
             if cmax == cmin:
-                sys.exit(1)
+                cmax = cmin + 1
+                print("ABORTING: cmax == cmin")
+                # return
+                # sys.exit(1)
             times = start_ts + (cycles - cmin) * (end_ts - start_ts) / (cmax - cmin)
         else:
             # fallback: relative cycles in seconds (not real seconds)

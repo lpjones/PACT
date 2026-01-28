@@ -1,8 +1,8 @@
 # Makefile for building libpact.so
 # Override variables from the command line if desired:
 CC      := clang
-CFLAGS  := -g3 -Wall -O0 -fPIC
-# CFLAGS  := -Wall -O3 -fPIC
+# CFLAGS  := -g3 -Wall -O0 -fPIC
+CFLAGS  := -Wall -O3 -fPIC
 LDFLAGS := -shared
 LIBS    := -lsyscall_intercept -lnuma -lpthread -ldl
 

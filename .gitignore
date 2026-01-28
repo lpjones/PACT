@@ -11,3 +11,4 @@ scripts/results/
 scripts/venv/
 scripts/*results/
 workloads/YCSB
+workloads/gapbs

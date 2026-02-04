@@ -13,7 +13,7 @@
 // #define REMOTE_SIZE (6 * (1024UL * 1024UL * 1024UL))
 
 #define FAST_NODE 0
-#define REM_NODE 1
+#define SLOW_NODE 1
 
 // #define PAGE_SIZE 4096UL              // 4KB
 // #define PAGE_SIZE (1 * (1024UL * 1024UL))
@@ -50,7 +50,7 @@ extern _Atomic bool fast_lock;
 
 enum {
     IN_FAST,
-    IN_REM
+    IN_SLOW
 };
 
 #ifndef MAX_NEIGHBORS

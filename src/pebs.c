@@ -146,23 +146,23 @@ void make_hot_request(struct pact_page* page) {
         pthread_mutex_unlock(&page->page_lock);
         return;
     }
+    assert(page->list != &free_list);
     page->hot = true;
     
     // add to hot list if:
     // page is not already in hot list and in slow mem
-    if (page->list != &hot_list && page->in_fast == IN_REM) {
+    if (page->list != &hot_list && page->in_fast == IN_SLOW) {
         // page should not be hot
         // not be cold since all cold pages are in fast
         // not be free 
         // either was in slow mem or just got dequeued
         // from cold list in migrate thread
         // page->list == &cold_list and in Remote
-#if LRU_ALGO == 0
         if (page->list != NULL) {
             assert(page->list == &cold_list);
             page_list_remove_page(&cold_list, page);
         }
-#endif
+
         assert(page->list == NULL);
         enqueue_fifo(&hot_list, page);
         page->mig_start = rdtscp();
@@ -171,8 +171,9 @@ void make_hot_request(struct pact_page* page) {
 #if LRU_ALGO == 1
     // If already in fast update LRU cold list
     else if (page->in_fast == IN_FAST) {
-        assert(page->list == &cold_list);
-        page_list_remove_page(&cold_list, page);
+        if (page->list != NULL) {
+            page_list_remove_page(page->list, page);
+        }
         enqueue_fifo(&cold_list, page);
     }
 #endif
@@ -226,7 +227,6 @@ void make_cold_request(struct pact_page* page) {
     pthread_mutex_unlock(&page->page_lock);
 }
 static uint64_t samples_since_cool = 0;
-static uint64_t sample_since_pred = 0;
 
 void process_perf_buffer(int cpu_idx, int evt) {
     struct perf_event_mmap_page *p = perf_page[cpu_idx][evt];
@@ -304,8 +304,13 @@ void process_perf_buffer(int cpu_idx, int evt) {
         page->accesses >>= (global_clock - page->local_clock);
         page->local_clock = global_clock;
 
-        if (evt == FASTREAD) pebs_stats.fast_accesses++;
-        else pebs_stats.slow_accesses++;
+        if (evt == FASTREAD) {
+            page->in_fast = IN_FAST;
+            pebs_stats.fast_accesses++;
+        } else {
+            page->in_fast = IN_SLOW;
+            pebs_stats.slow_accesses++;
+        }
         page->accesses++;
 
         uint64_t cur_cyc = rdtscp();
@@ -322,14 +327,14 @@ void process_perf_buffer(int cpu_idx, int evt) {
         if (page->accesses >= HOT_THRESHOLD) {
             // LOG_DEBUG("PEBS: Made hot: 0x%lx\n", page->va);
 #if RECORD == 1
-            struct pebs_rec p_rec = {
-                .va = page->va,
-                .ip = 0,
-                .cyc = rdtscp(),
-                .cpu = 0,
-                .evt = 0
-            };
-            fwrite(&p_rec, sizeof(struct pebs_rec), 1, pred_fp);
+            // struct pebs_rec p_rec = {
+            //     .va = page->va,
+            //     .ip = 0,
+            //     .cyc = rdtscp(),
+            //     .cpu = 0,
+            //     .evt = 0
+            // };
+            // fwrite(&p_rec, sizeof(struct pebs_rec), 1, pred_fp);
 #endif
             make_hot_request(page);
         } else {
@@ -360,7 +365,6 @@ void process_perf_buffer(int cpu_idx, int evt) {
 #if CLUSTER_ALGO == 1
         algo_add_page(page);
         if (cold_list.numentries != 0) {
-            sample_since_pred = 0;
             struct pact_page *pred_pages[MAX_NEIGHBORS * MAX_PRED_DEPTH];
             uint32_t idx = 0;
             algo_predict_pages(page, pred_pages, &idx);
@@ -479,7 +483,7 @@ void pact_migrate_page(struct pact_page *page, int node) {
             fwrite(&p_rec, sizeof(struct pebs_rec), 1, cold_fp);
 #endif
             pebs_stats.demotions++;
-            page->in_fast = IN_REM;
+            page->in_fast = IN_SLOW;
             page->hot = false;
         }
     }
@@ -501,7 +505,7 @@ void *demote_thread() {
         fast_size -= FAST_BUFFER;
 
         long slow_free;
-        long slow_size = numa_node_size(REM_NODE, &slow_free);
+        long slow_size = numa_node_size(SLOW_NODE, &slow_free);
         slow_used = slow_size - slow_free;
 #endif
         int bytes_demoted = 0;
@@ -514,9 +518,9 @@ void *demote_thread() {
             assert(cold_page != NULL);
             pthread_mutex_lock(&cold_page->page_lock);
 #if LRU_ALGO == 1
-            if (cold_page->list != NULL) {
+            if (cold_page->list != NULL || cold_page->in_fast == IN_SLOW) {
 #else
-            if (cold_page->list != NULL || cold_page->in_fast == IN_REM || cold_page->hot) {
+            if (cold_page->list != NULL || cold_page->in_fast == IN_SLOW || cold_page->hot) {
 #endif
                 // page got yoinked
                 pthread_mutex_unlock(&cold_page->page_lock);
@@ -526,8 +530,8 @@ void *demote_thread() {
             // assert(!cold_page->hot);
             assert(cold_page->list == NULL);
 
-            // pact_migrate_pages(&cold_page, 1, REM_NODE);
-            pact_migrate_page(cold_page, REM_NODE);
+            // pact_migrate_pages(&cold_page, 1, SLOW_NODE);
+            pact_migrate_page(cold_page, SLOW_NODE);
             cold_page->migrated = true;
             bytes_demoted += cold_page->size;
             LOG_DEBUG("MIG: demoted 0x%lx\n", cold_page->va);

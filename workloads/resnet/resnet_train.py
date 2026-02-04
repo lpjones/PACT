@@ -24,8 +24,8 @@ model = models.resnet50().to(device)
 # print(f"New number of threads: {new_threads}")
 
 # Synthetic data
-batch_size = 128
-# batch_size = 512
+# batch_size = 128
+batch_size = 256
 dummy_input = torch.randn(batch_size, 3, 224, 224).to(device)
 dummy_target = torch.randint(0, 1000, (batch_size,)).to(device)
 
@@ -36,20 +36,20 @@ optimizer = optim.SGD(model.parameters(), lr=0.01)
 epochs = 2
 iters_per_epoch = 2
 
-# model.train()
-
-##
 model.train()
 
-output = model(dummy_input)
-loss = criterion(output, dummy_target)
+##
+# model.train()
 
-grads = torch.autograd.grad(
-    loss,
-    model.parameters(),
-    retain_graph=True,
-    create_graph=False
-)
+# output = model(dummy_input)
+# loss = criterion(output, dummy_target)
+
+# grads = torch.autograd.grad(
+#     loss,
+#     model.parameters(),
+#     retain_graph=True,
+#     create_graph=False
+# )
 ##
 
 
@@ -57,10 +57,12 @@ for epoch in range(1, epochs + 1):
     start = time.time()
     for i in range(iters_per_epoch):
         print(f"Iteration {i + 1}/{iters_per_epoch}")
-        optimizer.zero_grad(set_to_none=False)
+        optimizer.zero_grad()
         output = model(dummy_input)
         loss = criterion(output, dummy_target)
-        loss.backward(retain_graph=True)
+        loss.backward(
+            #retain_graph=True
+            )
         optimizer.step()
     end = time.time()
     images_per_sec = (iters_per_epoch * batch_size) / (end - start)

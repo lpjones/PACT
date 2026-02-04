@@ -291,21 +291,37 @@ run_sample_period() {
 # run_pagr_hem 1 100 1
 # grid_search
 
-f_buf=536870912
+f_buf=1073741824
 record=1
 period=100
 app="128"
+# periods=(400 800 1600 3200 6400)
+
+# for p in ${periods[@]}; do
+#   # Resnet
+#   run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
+#     bfs_algo=0 dfs_algo=1 lru_algo=1 sample_period=$p \
+#     record=$record fast_buffer=$f_buf
+#   # run_app "resnet-PAGR-${app}" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
+#   run_app "ml-pagr-${p}" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "ml_test.py"
+# done
 
 # Resnet  
-run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
-  bfs_algo=0 dfs_algo=1 lru_algo=1 sample_period=$period \
+run_make pebs_stats=1 cluster_algo=0 hem_algo=0 \
+  bfs_algo=0 dfs_algo=1 lru_algo=0 sample_period=$period \
   record=$record fast_buffer=$f_buf
 # run_app "resnet-PAGR-${app}" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
-run_app "resnet_tf-PAGR-${app}" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train_tf.py"
+run_app "ml-${period}" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "ml_test.py"
+
+# run_app "resnet_tf-PAGR-${app}" "${RESNET_DIR}" "./build/resnet_train"
 # ./single_plots "resnet-PAGR-${app}"
 
 # run_app "cgups-PAGR-${app}" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 # ./single_plots "cgups-PAGR-${app}"
+
+# run_app "bfs-PAGR" "${GAPBS_DIR}" "./bfs" -f "twitter-2010.sg" -n 64 -r 0
+# run_app "bfs-hem" "${GAPBS_DIR}" "./bfs" -f "com-friendster.ungraph.sg" -n 64 -r 0
+
 
 # run_app "bfs-PAGR-${app}" "${GAPBS_DIR}" "./bfs" -g 27 -n 64 -r 0
 # ./single_plots "bfs-PAGR-${app}"
@@ -462,8 +478,8 @@ run_app "resnet_tf-PAGR-${app}" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "r
 
 # run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
 #   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
-#   max_neighbors=8 dfs_algo=1 run_app "bfs-PAGR-cold" "${GAPBS_DIR}" "./bfs" -f
-# "twitter-2010.sg" -n 64 -r 0
+#   max_neighbors=8 dfs_algo=1 
+# run_app "bfs-PAGR" "${GAPBS_DIR}" "./bfs" -f "twitter-2010.sg" -n 64 -r 0
 
 # Regular echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled echo
 # never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag

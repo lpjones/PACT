@@ -107,7 +107,7 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
     internal_call = true;
 
     unsigned long fast_nodemask = 1UL << FAST_NODE;
-    unsigned long slow_nodemask = 1UL << REM_NODE;
+    unsigned long slow_nodemask = 1UL << SLOW_NODE;
     void *p_fast = NULL, *p_slow = NULL;
 
     void *p = libc_mmap(addr, length, prot, flags | MAP_POPULATE, fd, offset);
@@ -124,7 +124,7 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         LOG_DEBUG("MMAP: All FAST\n");
 
 
-        if (mbind(p, length, MPOL_BIND, &fast_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT)) {
+        if (mbind(p, length, MPOL_PREFERRED, &fast_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT)) {
             perror("mbind");
             assert(0);
         }
@@ -135,7 +135,7 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         pthread_mutex_unlock(&mmap_lock);
         LOG_DEBUG("MMAP: All Remote\n");
         // fast full, all on slow
-        if (mbind(p, length, MPOL_BIND, &slow_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT)) {
+        if (mbind(p, length, MPOL_PREFERRED, &slow_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT)) {
             perror("mbind");
             assert(0);
         }
@@ -153,11 +153,11 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         LOG_DEBUG("MMAP: fast: %lu, slow: %lu\n", fast_mmap_size, slow_mmap_size);
         p_fast = p;
         p_slow = p_fast + fast_mmap_size;
-        if (mbind(p_fast, fast_mmap_size, MPOL_BIND, &fast_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
+        if (mbind(p_fast, fast_mmap_size, MPOL_PREFERRED, &fast_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
             perror("mbind");
             assert(0);
         }
-        if (mbind(p_slow, slow_mmap_size, MPOL_BIND, &slow_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
+        if (mbind(p_slow, slow_mmap_size, MPOL_PREFERRED, &slow_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
             perror("mbind");
             assert(0);
         }
@@ -210,7 +210,7 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         // page->next = NULL;
 
 
-        page->in_fast = (page->va_start >= p_slow) ? IN_REM : IN_FAST;
+        page->in_fast = (page->va_start >= p_slow) ? IN_SLOW : IN_FAST;
         page->hot = false;
         page->free = false;
         page->migrating = false;
@@ -268,7 +268,7 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         page->prev = NULL;
         page->next = NULL;
 
-        page->in_fast = (page->va_start >= p_slow) ? IN_REM : IN_FAST;
+        page->in_fast = (page->va_start >= p_slow) ? IN_SLOW : IN_FAST;
         page->hot = false;
         page->free = false;
         page->migrating = false;

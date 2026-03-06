@@ -91,6 +91,7 @@ static void* bind_symbol(const char *sym)
 
 static int hook(long syscall_number, long arg0, long arg1, long arg2, long arg3, long arg4, long arg5, long *result)
 {
+    
     if (syscall_number == SYS_mmap) {
       return mmap_filter((void*)arg0, (size_t)arg1, (int)arg2, (int)arg3, (int)arg4, (off_t)arg5, (uint64_t*)result);
     } else if (syscall_number == SYS_munmap){

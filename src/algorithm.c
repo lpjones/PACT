@@ -54,6 +54,7 @@ double bot_dist = 1;
 //     }
 //     return DEC_DOWN * val + (1.0 - DEC_DOWN) * top;
 // }
+#if CLUSTER_ALGO == 1
 
 // Trends towards lower part of range but still greater than min
 static inline double update_bot(double bot, double val) {
@@ -109,137 +110,101 @@ static double calc_distance(struct pact_page *a, struct pact_page *b) {
 
 
     avg_dist = DEC_DIST * distance + (1.0 - DEC_DIST) * avg_dist;
-    // dist_count++;
-    // printf("avg_dist: %f\n", avg_dist);
 
     return distance;
 }
 
-static void update_neighbors(struct pact_page *old_page) {
-    // cool neighbors
+static void update_neighbors(struct pact_page *old_page)
+{
+    LOG_PEBS(PAGR_UPDATE_NEIGHBOR);
+
+    struct neighbor_page *neighbors = old_page->neighbors;
+    uint64_t base_time = old_page->cyc_accessed;
+
+    /* ---- Decay distances ---- */
     for (uint32_t i = 0; i < MAX_NEIGHBORS; i++) {
         old_page->neighbors[i].distance *= NEIGHBOR_DEC;
     }
 
+    /* ---- Scan history ---- */
     for (uint32_t i = 0; i < HISTORY_SIZE; i++) {
+
         struct pact_page *cur_page = page_history[i];
-        if (cur_page == old_page) continue;
+        if (!cur_page || cur_page == old_page)
+            continue;
 
-        double distance = calc_distance(old_page, cur_page);
-        // assert(distance != 0);
-        
-        // Find empty spot or furthest distance neighbor O(MAX_NEIGHBORS)
-        struct neighbor_page *furthest_neighbor = NULL;
+        struct neighbor_page *slot = NULL;
+        struct neighbor_page *worst = &neighbors[0];
+
+        /* ---- Scan 4 neighbors (small fixed size) ---- */
         for (uint32_t j = 0; j < MAX_NEIGHBORS; j++) {
-            if (old_page->neighbors[j].page == cur_page) {
-                // already a neighbor, update and continue
-                // LOG_DEBUG("Already a neighbor\n");
-                furthest_neighbor = &old_page->neighbors[j];
-                furthest_neighbor->distance = 0;
-                break;
-            }
-            if (old_page->neighbors[j].page == NULL) {  // empty spot
-                // LOG_DEBUG("Empty spot\n");
-                assert(old_page->neighbors[j].distance == 0);
-                assert(old_page->neighbors[j].time_diff == 0);
-                // printf("found empty spot\n");
-                furthest_neighbor = &old_page->neighbors[j];
-                break;
+
+            struct neighbor_page *n = &neighbors[j];
+
+            if (n->page == cur_page) {
+                /* already neighbor -> refresh */
+                n->distance = 0;
+                goto next_page;
             }
 
-            if (furthest_neighbor == NULL || old_page->neighbors[j].distance > furthest_neighbor->distance) {
-                furthest_neighbor = &old_page->neighbors[j];
-            }
+            if (!n->page && !slot)
+                slot = n;
+
+            if (n->distance > worst->distance)
+                worst = n;
         }
 
-        // Replace furthest page with cur page if it's closer
-        // printf("furthest: %f, distance: %f\n", furthest_neighbor->distance, distance);
-        if (furthest_neighbor->distance == 0 || distance < furthest_neighbor->distance) {
-            // printf("adding page\n");
-            furthest_neighbor->page = cur_page;
-            furthest_neighbor->distance = distance;
-            furthest_neighbor->time_diff = cur_page->cyc_accessed - old_page->cyc_accessed;
+        struct neighbor_page *target = slot ? slot : worst;
+
+        /* ---- Only now compute distance ---- */
+        double distance = calc_distance(old_page, cur_page);
+
+        if (!target->page || distance < target->distance) {
+            target->page = cur_page;
+            target->distance = distance;
+            target->time_diff = cur_page->cyc_accessed - base_time;
         }
-        
+
+    next_page:
+        ;
     }
-    
 }
 
-void print_neighbors(struct pact_page *page, double time) {
-    LOG_NEIGHBOR("[%.9f]\t 0x%lx Neighbors:\t", time, page->va);
-    for (uint32_t i = 0; i < MAX_NEIGHBORS; i++) {
-        if (page->neighbors[i].page != NULL)
-            LOG_NEIGHBOR("0x%lx, ", page->neighbors[i].page->va);
-    }
-    LOG_NEIGHBOR("\n");
-}
+uint8_t algo_add_page(struct pact_page *page)
+{
+    struct pact_page *old_page = NULL;
+    uint32_t old_idx = 0;
 
-void algo_add_page(struct pact_page *page) {
-    // update neighbors of oldest page to get furthest lookahead 
-    // then replace it with the new page
+    uint64_t min_cyc = UINT64_MAX;
 
-    // find oldest page O(HISTORY_SIZE)
-    static double time_elapsed = 0;
-    struct pact_page *old_page = page_history[page_his_idx];
-    uint32_t old_idx = page_his_idx;
-
-    if (old_page == NULL) {
-        // LOG_DEBUG("ALGO: History not full yet\n");
-        // History not full yet, add page and return
-        page_history[page_his_idx] = page;
-        page_his_idx = (page_his_idx + 1) % HISTORY_SIZE;
-        return;
-    }
+    // Single pass: find oldest + detect duplicate
     for (uint32_t i = 0; i < HISTORY_SIZE; i++) {
-        if (page_history[i]->cyc_accessed < old_page->cyc_accessed) {
+        struct pact_page *p = page_history[i];
+
+        if (!p) {
+            page_history[i] = page;
+            return 0;
+        }
+
+        // Skip if same VA as last inserted (duplicate suppression)
+        if (p->va == page->va)
+            return 1;
+
+        if (p->cyc_accessed < min_cyc) {
+            min_cyc = p->cyc_accessed;
+            old_page = p;
             old_idx = i;
-            old_page = page_history[i];
         }
     }
 
-    // LOG_DEBUG("ALGO: oldest page: 0x%lx\n", old_page->va);
-
+    // Update neighbors of true oldest
     update_neighbors(old_page);
-    double time_tmp = elapsed_time(log_start_time, get_time());
-
-    if (time_tmp - time_elapsed >= 0.1) { // every 1 second prints neighbors of a page
-        print_neighbors(old_page, time_tmp);
-        time_elapsed = time_tmp;
-    }
 
     page_history[old_idx] = page;
-    
+
+    return 0;
 }
 
-// 29
-// static void record_sample(struct pact_page *page) {
-//     struct pebs_rec p_rec = {
-//         .va = page->va, //8
-//         .ip = page->ip, //8
-//         .cyc = page->cyc_accessed, //8
-//         .cpu = 0, //4
-//         .evt = page->in_fast //1
-//     };
-//     fwrite(&p_rec, sizeof(struct pebs_rec), 1, pred_fp);
-// }
-
-// // 45
-// static void record_neighbor(struct neighbor_page *neighbor) {
-//     if (neighbor->page == NULL) {
-//         char buf[sizeof(struct pebs_rec)] = {0};
-//         fwrite(buf, sizeof(struct pebs_rec), 1, pred_fp);
-//     } else {
-//         record_sample(neighbor->page);
-//     }
-//     // 29
-//     fwrite(&neighbor->distance, sizeof(double), 1, pred_fp); //8
-//     fwrite(&neighbor->time_diff, sizeof(uint64_t), 1, pred_fp); //8
-// }
-
-// Record format:
-// page predicting from (pebs_record)
-// neighboring pages (pebs_record + distance + time_diff)
-// threshold
 void algo_predict_pages(struct pact_page *page, struct pact_page **pred_pages, uint32_t *idx) {
     if (pebs_stats.throttles > pebs_stats.unthrottles) return;
     // record_sample(page); //29
@@ -251,7 +216,7 @@ void algo_predict_pages(struct pact_page *page, struct pact_page **pred_pages, u
     assert(*idx == 0);
     // double threshold = avg_dist / 4000;
     // LOG_DEBUG("Threshold: %.2e, avg_dist: %.2e\n", bot_dist, avg_dist);
-    double threshold = bot_dist;
+    
 #if ALL_ALGO == 1
     for (uint32_t i = 0; i < MAX_NEIGHBORS; i++) {
         if (page->neighbors[i].distance != 0) {
@@ -262,6 +227,7 @@ void algo_predict_pages(struct pact_page *page, struct pact_page **pred_pages, u
 
 #if DFS_ALGO == 1
     // DFS
+    double threshold = bot_dist;
     uint64_t tot_time_diff = 0;
     struct pact_page *cur_page = page;
     for (uint32_t d = 0; d < MAX_PRED_DEPTH; d++) {
@@ -289,3 +255,4 @@ void algo_predict_pages(struct pact_page *page, struct pact_page **pred_pages, u
 #endif
 
 }
+#endif

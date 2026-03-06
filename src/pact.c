@@ -110,7 +110,7 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
     unsigned long slow_nodemask = 1UL << SLOW_NODE;
     void *p_fast = NULL, *p_slow = NULL;
 
-    void *p = libc_mmap(addr, length, prot, flags | MAP_POPULATE, fd, offset);
+    void *p = libc_mmap(addr, length, prot, flags, fd, offset);
     assert(p != MAP_FAILED);
 
     pthread_mutex_lock(&mmap_lock);

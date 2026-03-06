@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import os
 import sys
+import numpy as np
 
 def plot_multiple(datasets, args):
     if not datasets:
@@ -11,8 +12,11 @@ def plot_multiple(datasets, args):
     if all(len(d) == 0 for d in datasets):
         print("No numbers found in any input files.", file=sys.stderr)
         return 2
-
+    
+    if args.labels == None:
+        args.labels = ["" * len(datasets)]
     max_val = 0
+
     for nums, label in zip(datasets, args.labels):
         if not nums:
             # plot an empty placeholder so legend remains consistent
@@ -22,9 +26,10 @@ def plot_multiple(datasets, args):
         y = nums[1]
         max_val = max(max(y), max_val)
 
-        print(label, sum(y) / len(y))
+        print(label, np.nanmedian(y))
         plt.plot(x, y, label=label)
 
+    # plt.yscale('log')
     plt.xlabel(args.xlabel)
     plt.ylabel(args.ylabel)
     plt.title(args.title)

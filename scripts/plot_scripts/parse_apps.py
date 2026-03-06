@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import numpy as np
 
 def parse_cgups(path):
     nums = []
@@ -112,3 +113,128 @@ def parse_stats(file_path):
                 val  = float(m.group(2))
                 met_dict.setdefault(name, []).append(val)
     return met_dict
+
+import matplotlib.pyplot as plt
+
+def parse_times(file_path, output_dir):
+    dtype = np.dtype([
+        ("ts", "<f8"),
+        ("group", "u1"),
+    ])
+
+    BASE_GROUPS = np.array([
+        "Read", "Lookup", "Cool", "Pred", #"Add page", "update neighbor", "pagr pred start", "pagr hot start", "sample_lru_start",
+        "Finish", "Reset Start", "Reset Finish"
+    ])
+
+    data = np.fromfile(file_path, dtype=dtype)
+
+    ts = data["ts"]
+    groups = data["group"]
+
+    finish_id = np.where(BASE_GROUPS == "Finish")[0][0]
+    finish_indices = np.where(groups == finish_id)[0]
+
+    num_stages = finish_id
+    finish_indices = finish_indices[finish_indices >= num_stages]
+
+    window_offsets = np.arange(-num_stages, 1)
+    windows = finish_indices[:, None] + window_offsets
+    window_ts = ts[windows]
+
+    durations = np.diff(window_ts, axis=1)
+    stage_names = BASE_GROUPS[:finish_id]
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # ---- Create distribution plot per stage ----
+    for i, stage in enumerate(stage_names):
+        stage_durations = durations[:, i]
+
+        # Remove zeros or negatives (required for log scale)
+        stage_durations = stage_durations[stage_durations > 0]
+
+        plt.figure()
+
+        # Log-spaced bins
+        bins = np.logspace(
+            np.log10(stage_durations.min()),
+            np.log10(stage_durations.max()),
+            100
+        )
+
+        plt.hist(stage_durations, bins=bins)
+        plt.xscale("log")
+        plt.yscale("log")
+
+        plt.xlabel("Time (seconds) [log scale]")
+        plt.ylabel("Frequency")
+        plt.title(f"{stage} Time Distribution")
+
+        output_path = os.path.join(output_dir, f"{stage}_distribution.png")
+        plt.savefig(output_path, bbox_inches="tight")
+        plt.close()
+
+        print(f"Saved: {output_path}")
+
+    # Optional: still print medians
+    median_time_taken = {
+        stage_names[i]: np.median(durations[:, i])
+        for i in range(len(stage_names))
+    }
+
+    tot_time = sum(median_time_taken.values())
+
+    print("\nMedian Time Per Stage:")
+    for k, v in median_time_taken.items():
+        print(f"{k}:\t{v:.9f}s ({100 * v / tot_time:.2f}%)")
+    print(f"Total:\t{tot_time:.9f}s")
+
+    # ts = data["ts"]
+    # group = data["group"]
+
+    # base_ids = group        # 0=PRED, 1=RESET, ...
+    # is_start = (group % 2) == 0  # True if _S
+
+    # results = {}
+
+    # for base_id, name in enumerate(BASE_GROUPS):
+    #     mask = base_ids == base_id
+
+    #     group_ts = ts[mask]
+    #     group_is_start = is_start[mask]
+
+    #     starts = group_ts[group_is_start]
+    #     finishes = group_ts[~group_is_start]
+
+    #     # Pair start and finish
+    #     count = min(len(starts), len(finishes))
+    #     durations = finishes[:count] - starts[:count]
+    #     timestamps = starts[:count]  # associate each duration with its start time
+
+    #     if len(durations) == 0:
+    #         results[name] = np.array([])
+    #         continue
+
+    #     # Compute bins
+    #     start_time = timestamps[0]
+    #     end_time = timestamps[-1]
+    #     n_bins = int(np.ceil((end_time - start_time) / interval))
+    #     bin_edges = start_time + np.arange(n_bins + 1) * interval
+
+    #     # Digitize timestamps into bins
+    #     bin_indices = np.digitize(timestamps, bin_edges) - 1  # bins start at 0
+
+    #     # Compute average per bin
+    #     avg_per_bin = np.zeros(n_bins)
+    #     for i in range(n_bins):
+    #         in_bin = durations[bin_indices == i]
+    #         if len(in_bin) > 0:
+    #             avg_per_bin[i] = np.median(in_bin)
+    #         else:
+    #             avg_per_bin[i] = np.nan  # or 0 if you prefer
+
+    #     results[name] = avg_per_bin
+
+    # return results
+

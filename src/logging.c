@@ -2,11 +2,12 @@
 
 FILE* debug_fp = NULL;
 FILE* stats_fp = NULL;
-FILE* time_fp = NULL;
-FILE* pred_fp = NULL;
-FILE* mig_fp = NULL;
-FILE* cold_fp = NULL;
-FILE* neigh_fp = NULL;
+FILE* pebs_fp = NULL;       // SAMPLE, RESET, PRED
+FILE* promote_fp = NULL;    // PROMOTE
+FILE* demote_fp = NULL;     // DEMOTE
+struct time_rec pebs_prof_buf[PEBS_PROF_BUF_SIZE] = {0};
+uint32_t pebs_prof_idx = 0;
+
 struct timespec log_start_time;
 
 void init_log_files() {
@@ -21,20 +22,15 @@ void init_log_files() {
     debug_fp = fopen("debuglog.txt", "w");
     assert(debug_fp != NULL);
 
-    time_fp = fopen("time.txt", "w");
-    assert(time_fp != NULL);
+    pebs_fp = fopen("pebs.bin", "wb");
+    assert(pebs_fp != NULL);
 
-    pred_fp = fopen("preds.bin", "wb");
-    assert(pred_fp != NULL);
+    promote_fp = fopen("promote.bin", "wb");
+    assert(promote_fp != NULL);
 
-    mig_fp = fopen("mig.bin", "wb");
-    assert(mig_fp != NULL);
+    demote_fp = fopen("demote.bin", "wb");
+    assert(demote_fp != NULL);
 
-    cold_fp = fopen("cold.bin", "wb");
-    assert(cold_fp != NULL);
-
-    neigh_fp = fopen("neigh.txt", "w");
-    assert(neigh_fp != NULL);
 #endif
     internal_call = false;
 

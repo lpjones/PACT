@@ -16,16 +16,16 @@ model = models.resnet50().to(device)
 # print(f"Current number of threads: {current_threads}")
 
 # # Set the desired number of threads
-# desired_threads = 4  # Example: set to 4 threads
-# torch.set_num_threads(desired_threads)
+desired_threads = 8  # Example: set to 4 threads
+torch.set_num_threads(desired_threads)
 
 # # Verify the new number of threads (optional)
 # new_threads = torch.get_num_threads()
 # print(f"New number of threads: {new_threads}")
 
 # Synthetic data
-# batch_size = 128
-batch_size = 256
+batch_size = 512
+# batch_size = 1
 dummy_input = torch.randn(batch_size, 3, 224, 224).to(device)
 dummy_target = torch.randint(0, 1000, (batch_size,)).to(device)
 

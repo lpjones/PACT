@@ -25,9 +25,8 @@ except:
 plt.style.use(os.path.join(script_dir, 'ieee.mplstyle'))
 
 parser = argparse.ArgumentParser()
-parser.add_argument("config", help="Name of config file (binary stats file)")
-parser.add_argument("--output", help="Output image filename (e.g. out.png, out.pdf).")
-parser.add_argument("-c", choices=["event", "cpu"], default="event", help="Color clusters by 'event' or 'cpu'")
+parser.add_argument("input", help="Name of config file (binary stats file)")
+parser.add_argument("output", help="Output image filename (e.g. out.png, out.pdf).")
 parser.add_argument("-fast", action="store_true", help="Use heatmap mode (faster to render large datasets). Without this flag the script uses the scatter version.")
 parser.add_argument("--title", default="", help="Plot title.")
 parser.add_argument('--start-percent', help='Start percent of file to read (0-100)', type=float, default=0.0)
@@ -42,58 +41,11 @@ use_heatmap = args.fast
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # Parameters
-gap_threshold_gb = .1
+gap_threshold_gb = 2
 min_accesses_per_cluster = 500
-min_perc_per_cluster = 0.05
 start_percent = args.start_percent
 end_percent = args.end_percent
 GB = 1024 ** 3
-
-
-def get_start_end_times(filepath):
-    """
-    Parses a file like the provided NUMA output and returns:
-        (start_timestamp, end_timestamp)
-    Assumes each timestamp is on its own line and is an integer.
-    """
-
-    # --- Get start time (first line) ---
-    with open(filepath, "r") as f:
-        first_line = f.readline().strip()
-        start_time = int(first_line)
-
-    # --- Get end time (scan backwards from end) ---
-    with open(filepath, "rb") as f:
-        f.seek(0, os.SEEK_END)
-        file_size = f.tell()
-
-        buffer = bytearray()
-        pointer = file_size - 1
-
-        while pointer >= 0:
-            f.seek(pointer)
-            byte = f.read(1)
-
-            if byte == b"\n":
-                if buffer:
-                    line = buffer[::-1].decode().strip()
-                    if line.isdigit():
-                        end_time = int(line)
-                        return 0, end_time - start_time
-                    buffer = bytearray()
-            else:
-                buffer.extend(byte)
-
-            pointer -= 1
-
-        # Handle case where last line has no trailing newline
-        if buffer:
-            line = buffer[::-1].decode().strip()
-            if line.isdigit():
-                end_time = int(line)
-                return 0, end_time - start_time
-
-    raise ValueError("No ending timestamp found.")
 
 
 def parse_mem_np(stats_file, start_percent, end_percent):
@@ -170,48 +122,43 @@ def infer_clusters_np(addresses, gap_threshold_gb):
 
 
 def cluster_mem_np(cycles, addrs, cpus, ips, events, clusters):
-
+    """
+    Vectorized grouping of samples into clusters.
+    Returns lists of numpy arrays per cluster:
+      cluster_cycles_list, cluster_addrs_list, cluster_cpus_list, cluster_ips_list, cluster_events_list
+    The order of clusters is the same as `clusters`.
+    """
     if len(clusters) == 0:
         return [], [], [], [], []
 
     starts = np.array([c[0] for c in clusters], dtype=np.uint64)
     ends = np.array([c[1] for c in clusters], dtype=np.uint64)
 
+    # For each sample address, determine cluster index:
+    # idx = rightmost start <= addr  -> searchsorted(right) - 1
     idxs = np.searchsorted(starts, addrs, side='right') - 1
-    valid = (idxs >= 0) & (addrs <= ends[idxs])
-    idxs = np.where(valid, idxs, -1)
 
-    # remove invalid
-    valid_mask = idxs >= 0
-    idxs = idxs[valid_mask]
+    # invalid idxs (addr < first start) will be -1; also ensure addr <= end[idx]
+    valid_mask = (idxs >= 0) & (addrs <= ends[idxs])
+    # Mark invalid samples with -1 so they won't match any cluster
+    idxs_validated = np.where(valid_mask, idxs, -1)
 
-    cycles = cycles[valid_mask]
-    addrs = addrs[valid_mask]
-    cpus = cpus[valid_mask]
-    ips = ips[valid_mask]
-    events = events[valid_mask]
+    cluster_cycles_list = []
+    cluster_addrs_list = []
+    cluster_cpus_list = []
+    cluster_ips_list = []
+    cluster_events_list = []
 
-    # sort once by cluster
-    order = np.argsort(idxs)
-    idxs = idxs[order]
+    # For each cluster index k, select samples
+    for k in range(len(clusters)):
+        sel = (idxs_validated == k)
+        cluster_cycles_list.append(cycles[sel])
+        cluster_addrs_list.append(addrs[sel])
+        cluster_cpus_list.append(cpus[sel])
+        cluster_ips_list.append(ips[sel])
+        cluster_events_list.append(events[sel])
 
-    cycles = cycles[order]
-    addrs = addrs[order]
-    cpus = cpus[order]
-    ips = ips[order]
-    events = events[order]
-
-    # split by cluster boundaries
-    split_points = np.flatnonzero(np.diff(idxs)) + 1
-    splits = np.split(np.arange(len(idxs)), split_points)
-
-    cluster_cycles = [cycles[s] for s in splits]
-    cluster_addrs = [addrs[s] for s in splits]
-    cluster_cpus = [cpus[s] for s in splits]
-    cluster_ips = [ips[s] for s in splits]
-    cluster_events = [events[s] for s in splits]
-
-    return cluster_cycles, cluster_addrs, cluster_cpus, cluster_ips, cluster_events
+    return cluster_cycles_list, cluster_addrs_list, cluster_cpus_list, cluster_ips_list, cluster_events_list
 
 
 def plot_clusters(cluster_cycles, cluster_addresses, cluster_cpus, cluster_ips, cluster_events, clusters, tot_addrs, config, color_by, use_heatmap=False, start_ts=None, end_ts=None):
@@ -227,10 +174,10 @@ def plot_clusters(cluster_cycles, cluster_addresses, cluster_cpus, cluster_ips, 
 
 
     for idx in range(len(clusters)):
-        cycles = cluster_cycles[idx].astype(np.float64, copy=False)
-        addrs = cluster_addresses[idx].astype(np.float64, copy=False)
-        events = cluster_events[idx]
-        cpus = cluster_cpus[idx]
+        cycles = np.asarray(cluster_cycles[idx]).astype(np.float64)
+        addrs = np.asarray(cluster_addresses[idx]).astype(np.float64)
+        events = np.asarray(cluster_events[idx])
+        cpus = np.asarray(cluster_cpus[idx])
         count = addrs.size
 
         percent = 100 * count / tot_addrs
@@ -318,8 +265,8 @@ def plot_clusters(cluster_cycles, cluster_addresses, cluster_cpus, cluster_ips, 
             mplstyle.use('fast')
             plt.figure(figsize=(10, 6))
 
-            bins_x = 600
-            bins_y = 600
+            bins_x = 300
+            bins_y = 300
 
             # Build common edges for this cluster so all histograms align
             cmin, cmax = float(times.min()), float(times.max())
@@ -480,7 +427,6 @@ if __name__ == "__main__":
 
     # Filter out clusters with too few accesses (vectorized counting)
     counts = np.array([a.size for a in cluster_addresses], dtype=int)
-    min_accesses_per_cluster = max(min_accesses_per_cluster, min_perc_per_cluster * len(raw_addresses))
     keep_mask = counts >= min_accesses_per_cluster
     if not np.any(keep_mask):
         print("No clusters passed the access count threshold.")
@@ -499,21 +445,21 @@ if __name__ == "__main__":
     # determine debuglog path in same folder as config
     config_path = Path(config)
     out_dir = str(config_path.parent) if config_path.parent != Path('.') else '.'
-    numactl_path = os.path.join(out_dir, 'numactl.txt')
+    debuglog_path = os.path.join(out_dir, 'debuglog.txt')
 
     start_ts = None
     end_ts = None
-    if os.path.exists(numactl_path):
+    if os.path.exists(debuglog_path):
         try:
-            orig_start, orig_end = get_start_end_times(numactl_path)
+            orig_start, orig_end = parse_log(debuglog_path)
             full_range = orig_end - orig_start
             start_ts = orig_start + full_range * (start_percent / 100)
             end_ts   = orig_start + full_range * (end_percent / 100)
             print(f"start={start_ts}, end={end_ts}")
         except Exception as e:
-            print(f"Warning: failed to parse numactl '{numactl_path}': {e}. Falling back to cycle-relative X axis.")
+            print(f"Warning: failed to parse debuglog '{debuglog_path}': {e}. Falling back to cycle-relative X axis.")
     else:
-        print(f"No numactl found at {numactl_path}. Using cycle-relative X axis.")
+        print(f"No debuglog found at {debuglog_path}. Using cycle-relative X axis.")
 
     plot_clusters(cluster_cycles, cluster_addresses, cluster_cpus, cluster_ips, cluster_events, clusters, raw_addresses.size, config, color_by, use_heatmap=use_heatmap, start_ts=start_ts, end_ts=end_ts)
 

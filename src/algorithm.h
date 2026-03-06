@@ -40,7 +40,7 @@ extern double mig_move_time;
 extern double bot_dist;
 extern double avg_dist;
 
-void algo_add_page(struct pact_page *page);
+uint8_t algo_add_page(struct pact_page *page);
 struct pact_page* algo_predict_page(struct pact_page *page);
 void algo_predict_pages(struct pact_page *page, struct pact_page **pred_pages, uint32_t *idx);
 

@@ -67,28 +67,32 @@ struct neighbor_page {
 
 struct pact_page {
     uint64_t va;
+#if CLUSTER_ALGO == 1
+    uint64_t cyc;
+    uint64_t ip;
+#endif
     void* va_start;
     uint64_t size;
-    uint64_t mig_up, mig_down;
     uint64_t accesses;
+
+#if HEM_ALGO == 1
     uint64_t local_clock;
-    uint64_t cyc_accessed;
-    uint64_t ip;
+#endif
+
     uint64_t mig_start;
     pthread_mutex_t page_lock;
 
     UT_hash_handle hh;
     struct pact_page *next, *prev;
+#if CLUSTER_ALGO == 1
     struct neighbor_page neighbors[MAX_NEIGHBORS];
+#endif
     struct fifo_list *list;
 
     // Page states
     _Atomic uint8_t in_fast;
-    _Atomic bool hot;
     _Atomic bool free;
-    _Atomic bool migrating;
-    _Atomic bool migrated;
-};
+} __attribute__((aligned(64)));
 
 void pact_init();
 void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);

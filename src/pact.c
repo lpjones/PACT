@@ -78,7 +78,7 @@ void pact_init() {
     // the set FAST capacity
     numa_set_preferred(FAST_NODE);
 
-    // LOG_DEBUG("FAST size: %lu, REMOTE size: %lu\n", FAST_SIZE, REMOTE_SIZE);
+    LOG_DEBUG("pact_page size: %lu\n", sizeof(struct pact_page));
 
     LOG_DEBUG("finished pact_init\n");
 
@@ -110,7 +110,9 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
     unsigned long slow_nodemask = 1UL << SLOW_NODE;
     void *p_fast = NULL, *p_slow = NULL;
 
-    void *p = libc_mmap(addr, length, prot, flags, fd, offset);
+
+
+    void *p = libc_mmap(addr, length, prot, flags & ~MAP_POPULATE, fd, offset); // Remove MAP_POPULATE until after mbind to prevent faulting and then migrating
     assert(p != MAP_FAILED);
 
     pthread_mutex_lock(&mmap_lock);
@@ -163,6 +165,14 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         }
         
     }
+
+    if (flags & MAP_POPULATE) {
+        size_t pagesize = sysconf(_SC_PAGESIZE);
+        for (size_t i = 0; i < length; i += pagesize) {
+            volatile char *addr = (char*)p + i;
+            *addr = 0;   // trigger page fault
+        }
+    }
     
 
 
@@ -198,24 +208,24 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         }
         if (page->va > max_pact_va) max_pact_va = page->va;
         if (page->va < min_pact_va) min_pact_va = page->va;
-        page->mig_up = 0;
-        page->mig_down = 0;
+#if HEM_ALGO == 1
         page->accesses = 0;
-        page->migrating = false;
         page->local_clock = 0;
-        page->cyc_accessed = 0;
+#endif
+#if CLUSTER_ALGO == 1
+        page->cyc = 0;
         page->ip = 0;
+#endif
 
         // page->prev = NULL;
         // page->next = NULL;
 
 
         page->in_fast = (page->va_start >= p_slow) ? IN_SLOW : IN_FAST;
-        page->hot = false;
         page->free = false;
-        page->migrating = false;
-        page->migrated = false;
+#if CLUSTER_ALGO == 1
         memset(page->neighbors, 0, MAX_NEIGHBORS * sizeof(struct neighbor_page));
+#endif
 
         assert(page->list == NULL);
         if (page->in_fast == IN_FAST) {
@@ -258,22 +268,23 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         }
         if (page->va > max_pact_va) max_pact_va = page->va;
         if (page->va < min_pact_va) min_pact_va = page->va;
-        page->mig_up = 0;
-        page->mig_down = 0;
+#if HEM_ALGO == 1
         page->accesses = 0;
         page->local_clock = 0;
-        page->cyc_accessed = 0;
+#endif
+#if CLUSTER_ALGO == 1
+        page->cyc = 0;
         page->ip = 0;
+#endif
 
         page->prev = NULL;
         page->next = NULL;
 
         page->in_fast = (page->va_start >= p_slow) ? IN_SLOW : IN_FAST;
-        page->hot = false;
         page->free = false;
-        page->migrating = false;
-        page->migrated = false;
+#if CLUSTER_ALGO == 1
         memset(page->neighbors, 0, MAX_NEIGHBORS * sizeof(struct neighbor_page));
+#endif
         pthread_mutex_init(&page->page_lock, NULL);
         page->list = NULL;
         if (page->in_fast == IN_FAST) {

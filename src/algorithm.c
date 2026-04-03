@@ -1,10 +1,28 @@
 #include "algorithm.h"
-#include <math.h>
+#include <float.h>
+
+double mig_queue_time = 0;
+double mig_move_time = 0;
+
+#if CLUSTER_ALGO == 1
 
 #define ABS(x) ((x) >= 0 ? (x) : -(x))
+#define MIN(a, b) ({ \
+    typeof(a) _a = (a); \
+    typeof(b) _b = (b); \
+    _a < _b ? _a : _b; \
+})
+
+#define MAX(a, b) ({ \
+    typeof(a) _a = (a); \
+    typeof(b) _b = (b); \
+    _a > _b ? _a : _b; \
+})
+
+#define CLIP(x, a, b) (MIN(MAX((x), (a)), (b)))
 
 #ifndef VA_WEIGHT
-#define VA_WEIGHT 1
+#define VA_WEIGHT 2
 #endif
 
 #ifndef CYC_WEIGHT
@@ -15,12 +33,12 @@
 #define IP_WEIGHT 1
 #endif
 
-#ifndef DEC_UP
-#define DEC_UP 0.01
+#ifndef DEC_FAST
+#define DEC_FAST 0.01
 #endif
 
-#ifndef DEC_DOWN
-#define DEC_DOWN 0.0001
+#ifndef DEC_SLOW
+#define DEC_SLOW 0.0002
 #endif
 
 #ifndef DEC_DIST
@@ -36,39 +54,30 @@
 struct pact_page *page_history[HISTORY_SIZE];
 uint32_t page_his_idx = 0;
 double mig_time = 0;
-double mig_queue_time = 0;
-double mig_move_time = 0;
+
 
 double avg_dist = 1;
 double bot_dist = 1;
 
 
-// static double top_va = 2, bot_va = 1;
-// static double top_cyc = 2, bot_cyc = 1;
-// static double top_ip = 2, bot_ip = 1;
+static double top_va = 2, bot_va = 1;
+static double top_cyc = 2, bot_cyc = 1;
+static double top_ip = 2, bot_ip = 1;
 
-// // Trends towards upper part of range but still less than max
-// static double update_top(double top, double val) {
-//     if (val > top) {
-//         return DEC_UP * val + (1.0 - DEC_UP) * top;
-//     }
-//     return DEC_DOWN * val + (1.0 - DEC_DOWN) * top;
-// }
-#if CLUSTER_ALGO == 1
+// Trends towards upper part of range but still less than max
+static inline double update_top(double top, double val) {
+    if (val < top) {
+        return DEC_SLOW * val + (1.0 - DEC_SLOW) * top;
+    }
+    return DEC_FAST * val + (1.0 - DEC_FAST) * top;
+}
 
 // Trends towards lower part of range but still greater than min
 static inline double update_bot(double bot, double val) {
-    if (val < bot / 10) {
-        val = bot / 10;
-    }
     if (val < bot) {
-        return DEC_UP * val + (1.0 - DEC_UP) * bot;
+        return DEC_FAST * val + (1.0 - DEC_FAST) * bot;
     }
-    if (val > bot * 10) {
-        val = bot * 10;
-    }
-    // val = sqrt(val - bot) + bot;
-    return DEC_DOWN * val + (1.0 - DEC_DOWN) * bot;
+    return DEC_SLOW * val + (1.0 - DEC_SLOW) * bot;
 }
 
 static double calc_distance(struct pact_page *a, struct pact_page *b) {
@@ -76,23 +85,27 @@ static double calc_distance(struct pact_page *a, struct pact_page *b) {
     // double x = 5;
     // printf("%f -> %f\n", (double)(a->va) - (double)(b->va), ABS((double)(a->va) - (double)(b->va)));
     double va_diff = ABS((double)(a->va) - (double)(b->va));
-    double cyc_diff = ABS((double)(a->cyc_accessed) - (double)(b->cyc_accessed));
+    double cyc_diff = ABS((double)(a->cyc) - (double)(b->cyc));
     double ip_diff = ABS((double)(a->ip) - (double)(b->ip));
 
-    // update ranges
-    // top_va = update_top(top_va, va_diff);
-    // top_cyc = update_top(top_cyc, cyc_diff);
-    // top_ip = update_top(top_ip, ip_diff);
+    // Normalization
+    double va_diff_clip = CLIP(va_diff, bot_va / 10, top_va * 10);
+    double cyc_diff_clip = CLIP(cyc_diff, bot_cyc / 10, top_cyc * 10);
+    double ip_diff_clip = CLIP(ip_diff, bot_ip / 10, top_ip * 10);
 
-    // bot_va = update_bot(bot_va, va_diff);
-    // bot_cyc = update_bot(bot_cyc, cyc_diff);
-    // bot_ip = update_bot(bot_ip, ip_diff);
+    top_va = update_top(top_va, va_diff_clip);
+    top_cyc = update_top(top_cyc, cyc_diff_clip);
+    top_ip = update_top(top_ip, ip_diff_clip);
 
-    // va_diff = (va_diff - bot_va) / (top_va - bot_va);
-    // cyc_diff = (cyc_diff - bot_cyc) / (top_cyc - bot_cyc);
-    // ip_diff = (ip_diff - bot_ip) / (top_ip - bot_ip);
+    bot_va = update_bot(bot_va, va_diff_clip);
+    bot_cyc = update_bot(bot_cyc, cyc_diff_clip);
+    bot_ip = update_bot(bot_ip, ip_diff_clip);
 
-    // printf("va: %f, cyc: %f, ip: %f\n", va_diff, cyc_diff, ip_diff);
+    va_diff = ABS((va_diff - bot_va) / (top_va - bot_va));
+    cyc_diff = ABS((cyc_diff - bot_cyc) / (top_cyc - bot_cyc));
+    ip_diff = ABS((ip_diff - bot_ip) / (top_ip - bot_ip));
+
+    // LOG_DEBUG("va: %f, cyc: %f, ip: %f\n", va_diff, cyc_diff, ip_diff);
 
 
     distance += va_diff * VA_WEIGHT;
@@ -101,73 +114,78 @@ static double calc_distance(struct pact_page *a, struct pact_page *b) {
 
     // if (distance == 0) return ;
 
-    double percent_fast = pebs_stats.fast_accesses / (pebs_stats.fast_accesses + pebs_stats.slow_accesses + 1);
+    // double percent_fast = pebs_stats.fast_accesses / (pebs_stats.fast_accesses + pebs_stats.slow_accesses + 1);
 
-    bot_dist = update_bot(bot_dist, distance * (1 - percent_fast * percent_fast));
+    double dist_clip = CLIP(distance, bot_dist / 10, avg_dist * 10);
+    bot_dist = update_bot(bot_dist, dist_clip);
+    // bot_dist = update_bot(bot_dist, distance * (1 - percent_fast * percent_fast));
 
     // when the percent is good you want it to do less (lower threshold)
     // when the percent is bad you want it to do more (higher threshold)
 
 
-    avg_dist = DEC_DIST * distance + (1.0 - DEC_DIST) * avg_dist;
+    avg_dist = DEC_DIST * dist_clip + (1.0 - DEC_DIST) * avg_dist;
 
     return distance;
 }
 
+// Update the neighbors for the page kicked out of the page_history buffer
 static void update_neighbors(struct pact_page *old_page)
 {
     LOG_PEBS(PAGR_UPDATE_NEIGHBOR);
 
-    struct neighbor_page *neighbors = old_page->neighbors;
-    uint64_t base_time = old_page->cyc_accessed;
-
-    /* ---- Decay distances ---- */
+    // cool neighbors
     for (uint32_t i = 0; i < MAX_NEIGHBORS; i++) {
         old_page->neighbors[i].distance *= NEIGHBOR_DEC;
     }
 
-    /* ---- Scan history ---- */
     for (uint32_t i = 0; i < HISTORY_SIZE; i++) {
-
         struct pact_page *cur_page = page_history[i];
-        if (!cur_page || cur_page == old_page)
-            continue;
+        if (cur_page == old_page) continue;
 
-        struct neighbor_page *slot = NULL;
-        struct neighbor_page *worst = &neighbors[0];
-
-        /* ---- Scan 4 neighbors (small fixed size) ---- */
+        double distance = calc_distance(old_page, cur_page);
+        // assert(distance != 0);
+        
+        // Find empty spot or furthest distance neighbor O(MAX_NEIGHBORS)
+        struct neighbor_page *furthest_neighbor = NULL;
         for (uint32_t j = 0; j < MAX_NEIGHBORS; j++) {
-
-            struct neighbor_page *n = &neighbors[j];
-
-            if (n->page == cur_page) {
-                /* already neighbor -> refresh */
-                n->distance = 0;
-                goto next_page;
+            if (old_page->neighbors[j].page == cur_page) {
+                // already a neighbor, update and continue
+                // LOG_DEBUG("Already a neighbor\n");
+                furthest_neighbor = &old_page->neighbors[j];
+                furthest_neighbor->distance = 0;
+                break;
+            }
+            if (old_page->neighbors[j].page == NULL) {  // empty spot
+                // LOG_DEBUG("Empty spot\n");
+                assert(old_page->neighbors[j].distance == 0);
+                assert(old_page->neighbors[j].time_diff == 0);
+                // printf("found empty spot\n");
+                furthest_neighbor = &old_page->neighbors[j];
+                break;
             }
 
-            if (!n->page && !slot)
-                slot = n;
-
-            if (n->distance > worst->distance)
-                worst = n;
+            if (furthest_neighbor == NULL || old_page->neighbors[j].distance > furthest_neighbor->distance) {
+                furthest_neighbor = &old_page->neighbors[j];
+            }
         }
 
-        struct neighbor_page *target = slot ? slot : worst;
-
-        /* ---- Only now compute distance ---- */
-        double distance = calc_distance(old_page, cur_page);
-
-        if (!target->page || distance < target->distance) {
-            target->page = cur_page;
-            target->distance = distance;
-            target->time_diff = cur_page->cyc_accessed - base_time;
+        // Replace furthest page with cur page if it's closer
+        // printf("furthest: %f, distance: %f\n", furthest_neighbor->distance, distance);
+        if (furthest_neighbor->distance == 0 || distance < furthest_neighbor->distance) {
+            // printf("adding page\n");
+            furthest_neighbor->page = cur_page;
+            furthest_neighbor->distance = distance;
+            furthest_neighbor->time_diff = cur_page->cyc - old_page->cyc;
         }
-
-    next_page:
-        ;
+        
     }
+    // printf("Neighbors:\t");
+    // for (uint32_t i = 0; i < MAX_NEIGHBORS; i++) {
+    //     if (old_page->neighbors[i].page != NULL)
+    //         printf("0x%lx, ", old_page->neighbors[i].page->va);
+    // }
+    // printf("\n");
 }
 
 uint8_t algo_add_page(struct pact_page *page)
@@ -187,17 +205,16 @@ uint8_t algo_add_page(struct pact_page *page)
         }
 
         // Skip if same VA as last inserted (duplicate suppression)
-        if (p->va == page->va)
-            return 1;
+        // if (p->va == page->va)
+        //     return 1;
 
-        if (p->cyc_accessed < min_cyc) {
-            min_cyc = p->cyc_accessed;
+        if (p->cyc < min_cyc) {
+            min_cyc = p->cyc;
             old_page = p;
             old_idx = i;
         }
     }
 
-    // Update neighbors of true oldest
     update_neighbors(old_page);
 
     page_history[old_idx] = page;
@@ -256,3 +273,4 @@ void algo_predict_pages(struct pact_page *page, struct pact_page **pred_pages, u
 
 }
 #endif
+

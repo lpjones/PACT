@@ -11,6 +11,7 @@ extern FILE* debug_fp;
 extern FILE* pebs_fp;       // SAMPLE, RESET, PRED
 extern FILE* promote_fp;    // PROMOTE
 extern FILE* demote_fp;     // DEMOTE
+extern FILE* pact_trace_fp;
 
 extern struct timespec log_start_time;
 
@@ -55,6 +56,12 @@ extern uint32_t pebs_prof_idx;
         fflush(debug_fp);                                                    \
     } while (0)
 
+
+#else
+#define LOG_DEBUG(...)
+#endif
+
+#if RECORD_TIMING == 1
 #define LOG_PEBS(grp)                                                   \
     do {                                                                    \
         pebs_prof_buf[pebs_prof_idx].ts = elapsed_time(log_start_time, get_time()),                 \
@@ -65,9 +72,7 @@ extern uint32_t pebs_prof_idx;
             pebs_prof_idx = 0;  \
         }   \
     } while (0)
-
 #else
-#define LOG_DEBUG(...)
 #define LOG_PEBS(...)
 #endif
 

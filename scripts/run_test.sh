@@ -2,7 +2,7 @@
 # run_test.sh Usage: ./run_test.sh              # runs the example at the bottom
 # OR source this file and call test "myconfig" "<full command line>"
 
-PRELOAD="/proj/TppPlus/tpp/libnuma_pgmig/src/libpact.so"
+PRELOAD="/proj/TppPlus/tpp/pact/src/libpact.so"
 CGUPS_DIR="../workloads/cgups"
 MGUPS_DIR="../../scripts/my_gups"
 HGUPS_DIR="../workloads/hgups"
@@ -80,7 +80,8 @@ test() {
 
   cd "${work_dir}"
   numactl -N0 env LD_PRELOAD="${PRELOAD}" "${cmd[@]}" > "${stdout_file}" 2> "${stderr_file}" &
-  # gdb --args sudo numactl -N0 env LD_PRELOAD="${PRELOAD}" "${cmd[@]}"
+  # numactl -N0 "${cmd[@]}" > "${stdout_file}" 2> "${stderr_file}" &
+  # gdb --args  numactl -N0 env LD_PRELOAD="${PRELOAD}" "${cmd[@]}"
   # monitor until app exits
   local app_pid=$!
 
@@ -140,7 +141,7 @@ function run_ycsb() {
   ./bin/ycsb load memcached \
     -p memcached.hosts=127.0.0.1:11211 \
     -threads 32 -s \
-    -P workloads/readonly >> $app 2>> $err &
+    -P workloads/sequential >> $app 2>> $err &
 
   YCSB_PID=$!
 
@@ -164,6 +165,8 @@ function run_ycsb() {
     sleep 2
     echo "Workload $workload"
     echo "Workload $workload" >> $app
+    date +%s >> $app
+    
     ./bin/ycsb run memcached -p memcached.hosts=127.0.0.1:11211 -threads 4 -s -P workloads/$workload >> $app 2>> $err
   done
 
@@ -191,7 +194,7 @@ run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
 
 # test "cgups-pagr" "${CGUPS_DIR}" "./gups64-rw" 8 move 60 kill 120
 
-run_ycsb "memcache-pagr-4096-notrace" 32000 "workloada" "workloadb" "workloadc" "workloadd" "workloade" "workloadf" "hotspot"
+run_ycsb "memcache-dis" 32000 "workloada" "workloadb" "workloadc" "workloadd" "workloade" "workloadf" "hotspot"
 
 # test "stream-pagr" "${STREAM_DIR}" "./stream" 12288 50
 
@@ -215,8 +218,8 @@ run_ycsb "memcache-pagr-4096-notrace" 32000 "workloada" "workloadb" "workloadc" 
 #   record=$record fast_buffer=$f_buf
 # test "resnet-hem-${app}" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
 
-# echo always | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
-# echo always | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+# echo always |  tee /sys/kernel/mm/transparent_hugepage/enabled
+# echo always |  tee /sys/kernel/mm/transparent_hugepage/defrag
 # # CGUPS
 # run_make cluster_algo=1 hem_algo=0 dfs_algo=1 lru_algo=1 \
 #   dec_down=0.0001 dec_up=0.01 sample_period=$period record=$record fast_buffer=$f_buf
@@ -226,8 +229,8 @@ run_ycsb "memcache-pagr-4096-notrace" 32000 "workloada" "workloadb" "workloadc" 
 #   record=$record fast_buffer=$f_buf
 # test "cgups-hem-${app}" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
-# echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
-# echo never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+# echo never |  tee /sys/kernel/mm/transparent_hugepage/enabled
+# echo never |  tee /sys/kernel/mm/transparent_hugepage/defrag
 
 # BFS
 # run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
@@ -262,8 +265,8 @@ run_ycsb "memcache-pagr-4096-notrace" 32000 "workloada" "workloadb" "workloadc" 
 #   record=$record fast_buffer=$f_buf
 # test "bc-hem-${app}" "${GAPBS_DIR}" "./bc" -g 27 -n 64 -r 0
 
-# echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
-# echo never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+# echo never |  tee /sys/kernel/mm/transparent_hugepage/enabled
+# echo never |  tee /sys/kernel/mm/transparent_hugepage/defrag
 
 # run_make cluster_algo=1 hem_algo=0 \
 #   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
@@ -271,8 +274,8 @@ run_ycsb "memcache-pagr-4096-notrace" 32000 "workloada" "workloadb" "workloadc" 
 # test "resnet-PAGR1" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
 
 
-# echo always | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
-# echo always | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+# echo always |  tee /sys/kernel/mm/transparent_hugepage/enabled
+# echo always |  tee /sys/kernel/mm/transparent_hugepage/defrag
 
 # run_make cluster_algo=0 hem_algo=1 dfs_algo=0 fast_buffer=0 fast_size=2147483648
 # run_make cluster_algo=1 hem_algo=0 dfs_algo=1 all_algo=0 fast_buffer=1073741824 lru_algo=1 sample_period=100
@@ -286,11 +289,11 @@ run_ycsb "memcache-pagr-4096-notrace" 32000 "workloada" "workloadb" "workloadc" 
 
 #resnet current best
 
-# THP echo always | sudo tee /sys/kernel/mm/transparent_hugepage/enabled echo
-# always | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+# THP echo always |  tee /sys/kernel/mm/transparent_hugepage/enabled echo
+# always |  tee /sys/kernel/mm/transparent_hugepage/defrag
 
-# Regular echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled echo
-# never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+# Regular echo never |  tee /sys/kernel/mm/transparent_hugepage/enabled echo
+# never |  tee /sys/kernel/mm/transparent_hugepage/defrag
 
 
 
@@ -342,8 +345,8 @@ run_ycsb "memcache-pagr-4096-notrace" 32000 "workloada" "workloadb" "workloadc" 
 # run_make cluster_algo=1 hem_algo=1 dfs_algo=1 test "cgups-both"
 # "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
-# echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled echo never |
-# sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+# echo never |  tee /sys/kernel/mm/transparent_hugepage/enabled echo never |
+#  tee /sys/kernel/mm/transparent_hugepage/defrag
 
 # run_make cluster_algo=0 hem_algo=0 dfs_algo=1 test "cgups-no-reg"
 # "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
@@ -357,8 +360,8 @@ run_ycsb "memcache-pagr-4096-notrace" 32000 "workloada" "workloadb" "workloadc" 
 # run_make cluster_algo=1 hem_algo=1 dfs_algo=1 test "cgups-both"
 # "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
-# #bfs THP echo always | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
-# echo always | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+# #bfs THP echo always |  tee /sys/kernel/mm/transparent_hugepage/enabled
+# echo always |  tee /sys/kernel/mm/transparent_hugepage/defrag
 
 
 # run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
@@ -366,8 +369,8 @@ run_ycsb "memcache-pagr-4096-notrace" 32000 "workloada" "workloadb" "workloadc" 
 #   max_neighbors=8 dfs_algo=1 
 # test "bfs-PAGR" "${GAPBS_DIR}" "./bfs" -f "twitter-2010.sg" -n 64 -r 0
 
-# Regular echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled echo
-# never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+# Regular echo never |  tee /sys/kernel/mm/transparent_hugepage/enabled echo
+# never |  tee /sys/kernel/mm/transparent_hugepage/defrag
 
 # run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
 #   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
@@ -391,8 +394,8 @@ run_ycsb "memcache-pagr-4096-notrace" 32000 "workloada" "workloadb" "workloadc" 
 #   max_neighbors=8 dfs_algo=1 test "stream-PAGR" "${STREAM_DIR}" "./stream"
 # 2048 50
 
-# echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled echo never |
-# sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+# echo never |  tee /sys/kernel/mm/transparent_hugepage/enabled echo never |
+#  tee /sys/kernel/mm/transparent_hugepage/defrag
 
 # run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
 #   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \

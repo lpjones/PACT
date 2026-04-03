@@ -1,6 +1,15 @@
 #ifndef _ALGORITHM_HEADER
 #define _ALGORITHM_HEADER
 
+#ifndef DEC_MIG_TIME
+    #define DEC_MIG_TIME 0.01
+#endif
+
+extern double mig_move_time;
+extern double mig_queue_time;
+
+
+#if CLUSTER_ALGO == 1
 /*
     To get neighborint pages:
     Look at pages in the future
@@ -19,9 +28,7 @@
 
 #include "pact.h"
 
-#ifndef DEC_MIG_TIME
-    #define DEC_MIG_TIME 0.01
-#endif
+
 
 #ifndef HISTORY_SIZE
     #define HISTORY_SIZE 16
@@ -35,8 +42,7 @@
 extern struct pact_page *page_history[HISTORY_SIZE];
 extern uint32_t page_his_idx;
 extern double mig_time;
-extern double mig_queue_time;
-extern double mig_move_time;
+
 extern double bot_dist;
 extern double avg_dist;
 
@@ -44,4 +50,5 @@ uint8_t algo_add_page(struct pact_page *page);
 struct pact_page* algo_predict_page(struct pact_page *page);
 void algo_predict_pages(struct pact_page *page, struct pact_page **pred_pages, uint32_t *idx);
 
+#endif
 #endif

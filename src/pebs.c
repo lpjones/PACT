@@ -7,13 +7,14 @@
 static int pfd[PEBS_NPROCS][NPBUFTYPES];
 static struct perf_event_mmap_page *perf_page[PEBS_NPROCS][NPBUFTYPES];
 static uint64_t no_samples[PEBS_NPROCS][NPBUFTYPES];
-static FILE* pact_trace_fp = NULL;
 static _Atomic bool kill_internal_threads[NUM_INTERNAL_THREADS];
 static pthread_t internal_threads[NUM_INTERNAL_THREADS];
 
 static _Thread_local uint64_t last_cyc_cool;
 
+#if HEM_ALGO == 1
 static uint64_t global_clock = 0;
+#endif
 
 
 struct perf_sample {
@@ -102,10 +103,13 @@ void* pebs_stats_thread() {
         uint64_t migrations = pebs_stats.promotions + pebs_stats.demotions;
         LOG_STATS("\tpromotions: [%lu]\tdemotions: [%lu]\tmigrations: [%lu]\tpebs_resets: [%lu]\tmig_move_time: [%.2f]\tmig_queue_time: [%.2f]\n", 
                 pebs_stats.promotions, pebs_stats.demotions, migrations, pebs_stats.pebs_resets, mig_move_time, mig_queue_time);
-
+#if CLUSTER_ALGO == 1
         LOG_STATS("\tthreshold: [%.2f]\tavg_dist: [%.2f]\tdiff: [%.2f]\n", bot_dist, avg_dist, avg_dist - bot_dist);
+#endif
 
         LOG_STATS("\tcold_pages: [%lu]\thot_pages: [%lu]\n", cold_list.numentries, hot_list.numentries);
+
+        LOG_STATS("\tmig_failed: [%lu]\n", pebs_stats.mig_failed);
 
 
 
@@ -116,6 +120,8 @@ void* pebs_stats_thread() {
         pebs_stats.throttles = 0;
         pebs_stats.unthrottles = 0;
         pebs_stats.pebs_resets = 0;
+        pebs_stats.mig_failed = 0;
+
         
 
 
@@ -147,7 +153,6 @@ void make_hot_request(struct pact_page* page) {
         return;
     }
     assert(page->list != &free_list);
-    page->hot = true;
     
     // add to hot list if:
     // page is not already in hot list and in slow mem
@@ -196,7 +201,6 @@ void make_cold_request(struct pact_page* page) {
         pthread_mutex_unlock(&page->page_lock);
         return;
     }
-    page->hot = false;
 #if LRU_ALGO == 0
     // move to cold list if:
     // page is not already in cold list and
@@ -297,24 +301,20 @@ void process_perf_buffer(int cpu_idx, int evt) {
         if (page == NULL) {
             continue;
         }
-// #if RECORD == 1
-        // struct pebs_rec p_rec = {
-        //     .va = addr_aligned,
-        //     .ip = rec.ip,
-        //     .cyc = rdtscp(),
-        //     .cpu = cpu_idx,
-        //     .evt = evt
-        // };
-        // fwrite(&p_rec, sizeof(struct pebs_rec), 1, pact_trace_fp);
-// #endif
+#if RECORD == 1
+        struct pebs_rec p_rec = {
+            .va = addr_aligned,
+            .ip = rec.ip,
+            .cyc = rdtscp(),
+            .cpu = cpu_idx,
+            .evt = evt
+        };
+        fwrite(&p_rec, sizeof(struct pebs_rec), 1, pact_trace_fp);
+#endif
 
-        // if (page->migrated) {
-        //     LOG_DEBUG("PEBS: accessed migrated page: 0x%lx\n", page->va);
-        // }
+
         LOG_PEBS(SAMPLE_COOL_START);
-        // cool off
-        page->accesses >>= (global_clock - page->local_clock);
-        page->local_clock = global_clock;
+
 
         if (evt == FASTREAD) {
             page->in_fast = IN_FAST;
@@ -323,13 +323,9 @@ void process_perf_buffer(int cpu_idx, int evt) {
             page->in_fast = IN_SLOW;
             pebs_stats.slow_accesses++;
         }
-        page->accesses++;
+        
 
-        uint64_t cur_cyc = rdtscp();
-        if (rec.time > page->cyc_accessed) {
-            page->cyc_accessed = rec.time;
-            page->ip = rec.ip;
-        }
+        
         LOG_PEBS(SAMPLE_PRED_START);
 
         // LRU cold list
@@ -337,11 +333,18 @@ void process_perf_buffer(int cpu_idx, int evt) {
         // Everything in FAST is cold
 
 #if HEM_ALGO == 1
+        // cool off
+        page->accesses >>= (global_clock - page->local_clock);
+        page->local_clock = global_clock;
+
+        page->accesses++;
+#if CLUSTER_ALGO != 1
         if (page->accesses >= HOT_THRESHOLD) {
             make_hot_request(page);
         } else {
             make_cold_request(page);
         }
+#endif
 
         // Sample based cooling
         samples_since_cool++;
@@ -350,6 +353,8 @@ void process_perf_buffer(int cpu_idx, int evt) {
             samples_since_cool = 0;
             last_cyc_cool = rdtscp();
         }
+
+        // uint64_t cur_cyc = rdtscp();
 
         // Time based cooling
         // if (cur_cyc - last_cyc_cool > CYC_COOL_THRESHOLD) {
@@ -361,15 +366,25 @@ void process_perf_buffer(int cpu_idx, int evt) {
 #endif 
 
         
-
-        
 #if CLUSTER_ALGO == 1
+        if (rec.time > page->cyc) {
+            page->cyc = rec.time;
+            page->ip = rec.ip;
+        }
         LOG_PEBS(PAGR_ADD_PAGE_START);
 
         uint8_t err = algo_add_page(page);
+        // make_hot_request(page);
 
         LOG_PEBS(PAGR_PRED_START);
-        if (err == 0 && cold_list.numentries != 0) {
+        double percent_fast = pebs_stats.fast_accesses / (pebs_stats.fast_accesses + pebs_stats.slow_accesses + 1);
+        if (
+#if HEM_ALGO == 1
+            page->accesses > C_HOT_THRESHOLD && 
+#endif
+            err == 0 && 
+            cold_list.numentries != 0 && 
+            percent_fast < 1) {
             struct pact_page *pred_pages[MAX_NEIGHBORS * MAX_PRED_DEPTH];
             uint32_t idx = 0;
             algo_predict_pages(page, pred_pages, &idx);
@@ -399,8 +414,7 @@ void process_perf_buffer(int cpu_idx, int evt) {
         make_cold_request(page);
 #endif
 #endif
-
-        no_samples[cpu_idx][evt] = cur_cyc;
+        no_samples[cpu_idx][evt] = rdtscp();
         LOG_PEBS(SAMPLE_FINISH);
     }
     LOG_PEBS(SAMPLE_RESET_START);
@@ -454,24 +468,26 @@ void pact_migrate_page(struct pact_page *page, int node) {
     if (mbind(page->va_start, page->size, MPOL_BIND, &nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
         perror("mbind");
         LOG_DEBUG("mbind failed %p\n", page->va_start);
+        pebs_stats.mig_failed++;
+        if (node == FAST_NODE) {    // Tried to promote it
+            enqueue_fifo(&cold_list, page);
+        } else {                    // Tried to demote it
+            enqueue_fifo(&cold_list, page);
+        }
     } else {
-        page->migrated = true;
         if (node == FAST_NODE) {
             // was migrated to fast
             pebs_stats.promotions++;
             page->in_fast = IN_FAST;
 #if LRU_ALGO == 1
-            page->hot = false;
             enqueue_fifo(&cold_list, page);
 #else
-            page->hot = true;
             enqueue_fifo(&hot_list, page);
 #endif
 
         } else {
             pebs_stats.demotions++;
             page->in_fast = IN_SLOW;
-            page->hot = false;
         }
     }
 }
@@ -504,22 +520,16 @@ void *demote_thread() {
             }
             assert(cold_page != NULL);
             pthread_mutex_lock(&cold_page->page_lock);
-#if LRU_ALGO == 1
             if (cold_page->list != NULL || cold_page->in_fast == IN_SLOW) {
-#else
-            if (cold_page->list != NULL || cold_page->in_fast == IN_SLOW || cold_page->hot) {
-#endif
                 // page got yoinked
                 pthread_mutex_unlock(&cold_page->page_lock);
                 continue;
             }
             assert(cold_page->in_fast == IN_FAST);
-            // assert(!cold_page->hot);
             assert(cold_page->list == NULL);
 
             // pact_migrate_pages(&cold_page, 1, SLOW_NODE);
             pact_migrate_page(cold_page, SLOW_NODE);
-            cold_page->migrated = true;
             bytes_demoted += cold_page->size;
             LOG_DEBUG("MIG: demoted 0x%lx\n", cold_page->va);
             pthread_mutex_unlock(&cold_page->page_lock);
@@ -596,11 +606,7 @@ void pebs_init(void) {
     start_pebs_stats_thread();
 #endif
 
-    pact_trace_fp = fopen("pact_trace.bin", "wb");
-    if (pact_trace_fp == NULL) {
-        perror("pact_trace file fopen");
-    }
-    assert(pact_trace_fp != NULL);
+    
 
     int pebs_start_cpu = 0;
     int num_cores = PEBS_NPROCS;

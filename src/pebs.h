@@ -66,6 +66,10 @@
     #define HOT_THRESHOLD 8
 #endif
 
+#ifndef C_HOT_THRESHOLD
+    #define C_HOT_THRESHOLD 4
+#endif
+
 #ifndef SAMPLE_COOLING_THRESHOLD
     #define SAMPLE_COOLING_THRESHOLD 100000
 #endif
@@ -111,6 +115,7 @@ struct pebs_stats {
     uint64_t promotions, demotions;
     uint64_t pebs_resets;
     uint64_t non_tracked_mem;
+    uint64_t mig_failed;
 };
 
 extern struct pebs_stats pebs_stats;

@@ -467,7 +467,7 @@ void pact_migrate_page(struct pact_page *page, int node) {
     unsigned long nodemask = 1UL << node;
     if (mbind(page->va_start, page->size, MPOL_BIND, &nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
         perror("mbind");
-        LOG_DEBUG("mbind failed %p\n", page->va_start);
+        // LOG_DEBUG("mbind failed %p\n", page->va_start);
         pebs_stats.mig_failed++;
         if (node == FAST_NODE) {    // Tried to promote it
             enqueue_fifo(&cold_list, page);
@@ -495,7 +495,7 @@ void *demote_thread() {
     internal_call = true;
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
-    CPU_SET(PROMOTE_CPU, &cpuset);
+    CPU_SET(DEMOTE_CPU, &cpuset);
     int s = pthread_setaffinity_np(internal_threads[DEMOTE_THREAD], sizeof(cpu_set_t), &cpuset);
     assert(s == 0);
 
@@ -515,7 +515,7 @@ void *demote_thread() {
         while (fast_free + bytes_demoted < FAST_BUFFER) {
             struct pact_page *cold_page = dequeue_fifo(&cold_list);
             if (cold_page == NULL) {
-                LOG_DEBUG("MIG: no cold pages, aborting\n");
+                // LOG_DEBUG("MIG: no cold pages, aborting\n");
                 break;
             }
             assert(cold_page != NULL);
@@ -531,7 +531,7 @@ void *demote_thread() {
             // pact_migrate_pages(&cold_page, 1, SLOW_NODE);
             pact_migrate_page(cold_page, SLOW_NODE);
             bytes_demoted += cold_page->size;
-            LOG_DEBUG("MIG: demoted 0x%lx\n", cold_page->va);
+            // LOG_DEBUG("MIG: demoted 0x%lx\n", cold_page->va);
             pthread_mutex_unlock(&cold_page->page_lock);
         }
         // sleep(0.01);
@@ -563,14 +563,14 @@ void *promote_thread() {
             continue;
         }
         
-        LOG_DEBUG("MIG: got hot page: 0x%lx\n", hot_page->va);
+        // LOG_DEBUG("MIG: got hot page: 0x%lx\n", hot_page->va);
 
         uint64_t mig_queue_cyc = rdtscp();
         uint64_t mig_queue_diff = mig_queue_cyc - hot_page->mig_start;
         mig_queue_time = DEC_MIG_TIME * mig_queue_diff + (1.0 - DEC_MIG_TIME) * mig_queue_time;
         pact_migrate_page(hot_page, FAST_NODE);
 
-        LOG_DEBUG("MIG: Finished migration: 0x%lx\n", hot_page->va);
+        // LOG_DEBUG("MIG: Finished migration: 0x%lx\n", hot_page->va);
 
         uint64_t mig_move_diff = rdtscp() - mig_queue_cyc;
         mig_move_time = DEC_MIG_TIME * mig_move_diff + (1.0 - DEC_MIG_TIME) * mig_move_time;

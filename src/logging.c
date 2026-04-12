@@ -7,17 +7,20 @@ FILE* stats_fp = NULL;
 #if RECORD == 1
 FILE* debug_fp = NULL;
 FILE* pact_trace_fp = NULL;
+FILE* pred_fp = NULL;
 #endif
 
 #if RECORD_TIMING == 1
 FILE* pebs_fp = NULL;       // SAMPLE, RESET, PRED
 FILE* promote_fp = NULL;    // PROMOTE
 FILE* demote_fp = NULL;     // DEMOTE
+uint64_t pebs_start_times[PEBS_PROF_NP];
+
 struct time_rec pebs_prof_buf[PEBS_PROF_BUF_SIZE] = {0};
 uint32_t pebs_prof_idx = 0;
 #endif
 
-struct timespec log_start_time;
+uint64_t log_start_time;
 
 void init_log_files() {
     internal_call = true;
@@ -33,6 +36,9 @@ void init_log_files() {
 
     pact_trace_fp = fopen("pact_trace.bin", "wb");
     assert(pact_trace_fp != NULL);
+
+    pred_fp = fopen("pred.bin", "wb");
+    assert(pred_fp != NULL);
 #endif
 
 #if RECORD_TIMING == 1

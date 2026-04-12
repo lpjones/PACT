@@ -25,6 +25,7 @@ fast_size ?= 0
 fast_buffer ?= 4294967296
 sample_period ?= 100
 record ?= 1
+record_timing ?= 1
 
 CFLAGS += -DPEBS_STATS=$(pebs_stats)
 CFLAGS += -DCLUSTER_ALGO=$(cluster_algo)
@@ -44,6 +45,7 @@ CFLAGS += -DFAST_BUFFER=$(fast_buffer)
 CFLAGS += -DLRU_ALGO=$(lru_algo)
 CFLAGS += -DSAMPLE_PERIOD=$(sample_period)
 CFLAGS += -DRECORD=$(record)
+CFLAGS += -DRECORD_TIMING=$(record_timing)
 
 # Sources / Objects
 SRCS := interpose.c pact.c pebs.c timer.c logging.c spsc-ring.c fifo.c algorithm.c

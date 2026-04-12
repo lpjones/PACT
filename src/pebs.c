@@ -240,7 +240,8 @@ void process_perf_buffer(int cpu_idx, int evt) {
     uint64_t num_loops = 0;
 
     while (p->data_head != p->data_tail && num_loops++ != 128) {
-        LOG_PEBS(SAMPLE_READ_START);
+        LOG_START_PEBS(SAMPLE_READ);
+        LOG_START_PEBS(SAMPLE);
 
         struct perf_sample rec = {.addr = 0};
         char *data = (char*)p + p->data_offset;
@@ -288,7 +289,8 @@ void process_perf_buffer(int cpu_idx, int evt) {
         // continue;
 
         if (rec.addr == 0) continue;
-        LOG_PEBS(SAMPLE_LOOKUP_START);
+        LOG_END_PEBS(SAMPLE_READ);
+        LOG_START_PEBS(SAMPLE_LOOKUP);
 
         uint64_t addr_aligned = rec.addr & PAGE_MASK;
         struct pact_page *page = find_page_no_lock(addr_aligned);
@@ -297,7 +299,7 @@ void process_perf_buffer(int cpu_idx, int evt) {
         if (page == NULL) {
             page = find_page_no_lock(rec.addr & BASE_PAGE_MASK);
         }
-
+        LOG_END_PEBS(SAMPLE_LOOKUP);
         if (page == NULL) {
             continue;
         }
@@ -313,9 +315,6 @@ void process_perf_buffer(int cpu_idx, int evt) {
 #endif
 
 
-        LOG_PEBS(SAMPLE_COOL_START);
-
-
         if (evt == FASTREAD) {
             page->in_fast = IN_FAST;
             pebs_stats.fast_accesses++;
@@ -326,7 +325,7 @@ void process_perf_buffer(int cpu_idx, int evt) {
         
 
         
-        LOG_PEBS(SAMPLE_PRED_START);
+        LOG_START_PEBS(SAMPLE_PRED);
 
         // LRU cold list
         // if sample is cold move to end of cold queue
@@ -337,15 +336,26 @@ void process_perf_buffer(int cpu_idx, int evt) {
         page->accesses >>= (global_clock - page->local_clock);
         page->local_clock = global_clock;
 
+
         page->accesses++;
 #if CLUSTER_ALGO != 1
         if (page->accesses >= HOT_THRESHOLD) {
+#if RECORD == 1
+                struct pebs_rec p_rec = {
+                    .va = page->va,
+                    .ip = 0,
+                    .cyc = rdtscp(),
+                    .cpu = 0,
+                    .evt = 0
+                };
+                fwrite(&p_rec, sizeof(struct pebs_rec), 1, pred_fp);
+#endif
             make_hot_request(page);
         } else {
             make_cold_request(page);
         }
 #endif
-
+        LOG_END_PEBS(SAMPLE_PRED);
         // Sample based cooling
         samples_since_cool++;
         if (samples_since_cool >= SAMPLE_COOLING_THRESHOLD) {
@@ -371,12 +381,13 @@ void process_perf_buffer(int cpu_idx, int evt) {
             page->cyc = rec.time;
             page->ip = rec.ip;
         }
-        LOG_PEBS(PAGR_ADD_PAGE_START);
+        LOG_START_PEBS(PAGR_ADD_PAGE);
 
         uint8_t err = algo_add_page(page);
         // make_hot_request(page);
+        LOG_END_PEBS(PAGR_ADD_PAGE);
 
-        LOG_PEBS(PAGR_PRED_START);
+        
         double percent_fast = pebs_stats.fast_accesses / (pebs_stats.fast_accesses + pebs_stats.slow_accesses + 1);
         if (
 #if HEM_ALGO == 1
@@ -387,49 +398,55 @@ void process_perf_buffer(int cpu_idx, int evt) {
             percent_fast < 1) {
             struct pact_page *pred_pages[MAX_NEIGHBORS * MAX_PRED_DEPTH];
             uint32_t idx = 0;
+            LOG_START_PEBS(PAGR_PRED);
             algo_predict_pages(page, pred_pages, &idx);
-            LOG_PEBS(PAGR_MAKE_HOT_START);
+            LOG_END_PEBS(PAGR_PRED);
+
+            LOG_START_PEBS(PAGR_MAKE_HOT);
             for (uint32_t i = 0; i < idx; i++) {
                 // LOG_DEBUG("PRED: 0x%lx from 0x%lx\n", pred_pages[i]->va, page->va);
-// #if RECORD == 1
-//                 struct pebs_rec p_rec = {
-//                     .va = pred_pages[i]->va,
-//                     .ip = 0,
-//                     .cyc = rdtscp(),
-//                     .cpu = 0,
-//                     .evt = 0
-//                 };
-//                 fwrite(&p_rec, sizeof(struct pebs_rec), 1, pred_fp);
-// #endif
+#if RECORD == 1
+                struct pebs_rec p_rec = {
+                    .va = pred_pages[i]->va,
+                    .ip = 0,
+                    .cyc = rdtscp(),
+                    .cpu = 0,
+                    .evt = 0
+                };
+                fwrite(&p_rec, sizeof(struct pebs_rec), 1, pred_fp);
+#endif
                 make_hot_request(pred_pages[i]);
             }
+            LOG_END_PEBS(PAGR_MAKE_HOT);
             
         }
-        
+        LOG_END_PEBS(SAMPLE_PRED);
 #if LRU_ALGO == 1
-        LOG_PEBS(SAMPLE_LRU_START);
+        LOG_START_PEBS(SAMPLE_LRU);
         // LRU based cold list
         // everything in FAST is in cold list
         // with oldest page at front of queue
         make_cold_request(page);
+        LOG_END_PEBS(SAMPLE_LRU);
 #endif
 #endif
         no_samples[cpu_idx][evt] = rdtscp();
-        LOG_PEBS(SAMPLE_FINISH);
+        LOG_END_PEBS(SAMPLE);
     }
-    LOG_PEBS(SAMPLE_RESET_START);
     no_samples[cpu_idx][evt]++;
     p->data_tail = p->data_head;
 
     uint64_t cur_cyc = rdtscp();
     if (cur_cyc > no_samples[cpu_idx][evt] + NO_SAMPLE_RESET_TIME) {
+        LOG_START_PEBS(SAMPLE_RESET);
+
         pebs_stats.pebs_resets++;
         ioctl(pfd[cpu_idx][evt], PERF_EVENT_IOC_DISABLE);
         ioctl(pfd[cpu_idx][evt], PERF_EVENT_IOC_RESET);
         ioctl(pfd[cpu_idx][evt], PERF_EVENT_IOC_ENABLE);
         no_samples[cpu_idx][evt] = cur_cyc;
+        LOG_END_PEBS(SAMPLE_RESET);
     }
-    LOG_PEBS(SAMPLE_RESET_FINISH);
 }
 
 

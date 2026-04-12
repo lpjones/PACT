@@ -1,18 +1,11 @@
 #include "timer.h"
 
-struct timespec get_time() {
-    struct timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) == -1) {
-        printf("get_time failed\n");
-        assert(0);
-    }
-    return ts;
+inline uint64_t get_time() {
+    return rdtscp();
 }
 
-double elapsed_time(struct timespec start, struct timespec end) {
-    long long elapsed_ns = (end.tv_sec - start.tv_sec) * 1000000000LL +
-                 (end.tv_nsec - start.tv_nsec);
-    return elapsed_ns / 1000000000.0;
+inline double elapsed_time(uint64_t start, uint64_t end) {
+    return (double)(end - start) / (double)CPU_FREQ;
 }
 
 uint64_t rdtscp(void) {

@@ -132,7 +132,7 @@ static double calc_distance(struct pact_page *a, struct pact_page *b) {
 // Update the neighbors for the page kicked out of the page_history buffer
 static void update_neighbors(struct pact_page *old_page)
 {
-    LOG_PEBS(PAGR_UPDATE_NEIGHBOR);
+    LOG_START_PEBS(PAGR_UPDATE_NEIGHBOR);
 
     // cool neighbors
     for (uint32_t i = 0; i < MAX_NEIGHBORS; i++) {
@@ -180,6 +180,7 @@ static void update_neighbors(struct pact_page *old_page)
         }
         
     }
+    LOG_END_PEBS(PAGR_UPDATE_NEIGHBOR);
     // printf("Neighbors:\t");
     // for (uint32_t i = 0; i < MAX_NEIGHBORS; i++) {
     //     if (old_page->neighbors[i].page != NULL)

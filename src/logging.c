@@ -8,6 +8,8 @@ FILE* stats_fp = NULL;
 FILE* debug_fp = NULL;
 FILE* pact_trace_fp = NULL;
 FILE* pred_fp = NULL;
+FILE* promote_pred_fp = NULL;
+FILE* demote_pred_fp = NULL;
 #endif
 
 #if RECORD_TIMING == 1
@@ -39,6 +41,12 @@ void init_log_files() {
 
     pred_fp = fopen("pred.bin", "wb");
     assert(pred_fp != NULL);
+
+    demote_pred_fp = fopen("demote_pred.bin", "wb");
+    assert(demote_pred_fp != NULL);
+
+    promote_pred_fp = fopen("promote_pred.bin", "wb");
+    assert(promote_pred_fp != NULL);
 #endif
 
 #if RECORD_TIMING == 1

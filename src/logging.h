@@ -9,10 +9,10 @@
 extern FILE* stats_fp;
 extern FILE* debug_fp;
 extern FILE* pebs_fp;       // SAMPLE, RESET, PRED
-extern FILE* promote_fp;    // PROMOTE
-extern FILE* demote_fp;     // DEMOTE
 extern FILE* pact_trace_fp;
 extern FILE* pred_fp;
+extern FILE* promote_pred_fp;
+extern FILE* demote_pred_fp;
 
 extern uint64_t log_start_time;
 

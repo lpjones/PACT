@@ -168,6 +168,18 @@ void make_hot_request(struct pact_page* page) {
             page_list_remove_page(&cold_list, page);
         }
 
+#if RECORD == 1
+        // record prediction
+        struct pebs_rec p_rec = {
+            .va = page->va,
+            .ip = 0,
+            .cyc = rdtscp(),
+            .cpu = 0,
+            .evt = 0
+        };
+        fwrite(&p_rec, sizeof(struct pebs_rec), 1, pred_fp);
+#endif
+
         assert(page->list == NULL);
         enqueue_fifo(&hot_list, page);
         page->mig_start = rdtscp();
@@ -340,16 +352,6 @@ void process_perf_buffer(int cpu_idx, int evt) {
         page->accesses++;
 #if CLUSTER_ALGO != 1
         if (page->accesses >= HOT_THRESHOLD) {
-#if RECORD == 1
-                struct pebs_rec p_rec = {
-                    .va = page->va,
-                    .ip = 0,
-                    .cyc = rdtscp(),
-                    .cpu = 0,
-                    .evt = 0
-                };
-                fwrite(&p_rec, sizeof(struct pebs_rec), 1, pred_fp);
-#endif
             make_hot_request(page);
         } else {
             make_cold_request(page);
@@ -405,16 +407,6 @@ void process_perf_buffer(int cpu_idx, int evt) {
             LOG_START_PEBS(PAGR_MAKE_HOT);
             for (uint32_t i = 0; i < idx; i++) {
                 // LOG_DEBUG("PRED: 0x%lx from 0x%lx\n", pred_pages[i]->va, page->va);
-#if RECORD == 1
-                struct pebs_rec p_rec = {
-                    .va = pred_pages[i]->va,
-                    .ip = 0,
-                    .cyc = rdtscp(),
-                    .cpu = 0,
-                    .evt = 0
-                };
-                fwrite(&p_rec, sizeof(struct pebs_rec), 1, pred_fp);
-#endif
                 make_hot_request(pred_pages[i]);
             }
             LOG_END_PEBS(PAGR_MAKE_HOT);
@@ -487,12 +479,23 @@ void pact_migrate_page(struct pact_page *page, int node) {
         // LOG_DEBUG("mbind failed %p\n", page->va_start);
         pebs_stats.mig_failed++;
         if (node == FAST_NODE) {    // Tried to promote it
-            enqueue_fifo(&cold_list, page);
+            enqueue_fifo(&hot_list, page);
         } else {                    // Tried to demote it
             enqueue_fifo(&cold_list, page);
         }
     } else {
         if (node == FAST_NODE) {
+#if RECORD == 1
+            // record promotion
+            struct pebs_rec p_rec = {
+                .va = page->va,
+                .ip = 0,
+                .cyc = rdtscp(),
+                .cpu = 0,
+                .evt = 0
+            };
+            fwrite(&p_rec, sizeof(struct pebs_rec), 1, promote_pred_fp);
+#endif
             // was migrated to fast
             pebs_stats.promotions++;
             page->in_fast = IN_FAST;
@@ -503,6 +506,17 @@ void pact_migrate_page(struct pact_page *page, int node) {
 #endif
 
         } else {
+#if RECORD == 1
+            // record demotion
+            struct pebs_rec p_rec = {
+                .va = page->va,
+                .ip = 0,
+                .cyc = rdtscp(),
+                .cpu = 0,
+                .evt = 0
+            };
+            fwrite(&p_rec, sizeof(struct pebs_rec), 1, demote_pred_fp);
+#endif
             pebs_stats.demotions++;
             page->in_fast = IN_SLOW;
         }
@@ -546,6 +560,17 @@ void *demote_thread() {
             assert(cold_page->list == NULL);
 
             // pact_migrate_pages(&cold_page, 1, SLOW_NODE);
+#if RECORD == 1
+            // record prediction
+            struct pebs_rec p_rec = {
+                .va = cold_page->va,
+                .ip = 0,
+                .cyc = rdtscp(),
+                .cpu = 0,
+                .evt = 0
+            };
+            fwrite(&p_rec, sizeof(struct pebs_rec), 1, demote_pred_fp);
+#endif
             pact_migrate_page(cold_page, SLOW_NODE);
             bytes_demoted += cold_page->size;
             // LOG_DEBUG("MIG: demoted 0x%lx\n", cold_page->va);

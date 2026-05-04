@@ -8,7 +8,7 @@ LIBS    := -lsyscall_intercept -lnuma -lpthread -ldl
 
 # knobs
 pebs_stats ?= 1
-cluster_algo ?= 0
+pagr_algo ?= 0
 hem_algo ?= 0
 lru_algo ?= 0
 bfs_algo ?= 0
@@ -28,7 +28,7 @@ record ?= 1
 record_timing ?= 1
 
 CFLAGS += -DPEBS_STATS=$(pebs_stats)
-CFLAGS += -DCLUSTER_ALGO=$(cluster_algo)
+CFLAGS += -DPAGR_ALGO=$(pagr_algo)
 CFLAGS += -DHEM_ALGO=$(hem_algo)
 CFLAGS += -DBFS_ALGO=$(bfs_algo)
 CFLAGS += -DDFS_ALGO=$(dfs_algo)

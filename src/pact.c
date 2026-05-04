@@ -212,7 +212,7 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         page->accesses = 0;
         page->local_clock = 0;
 #endif
-#if CLUSTER_ALGO == 1
+#if PAGR_ALGO == 1
         page->cyc = 0;
         page->ip = 0;
 #endif
@@ -223,7 +223,7 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
 
         page->in_fast = (page->va_start >= p_slow) ? IN_SLOW : IN_FAST;
         page->free = false;
-#if CLUSTER_ALGO == 1
+#if PAGR_ALGO == 1
         memset(page->neighbors, 0, MAX_NEIGHBORS * sizeof(struct neighbor_page));
 #endif
 
@@ -272,7 +272,7 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         page->accesses = 0;
         page->local_clock = 0;
 #endif
-#if CLUSTER_ALGO == 1
+#if PAGR_ALGO == 1
         page->cyc = 0;
         page->ip = 0;
 #endif
@@ -282,7 +282,7 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
 
         page->in_fast = (page->va_start >= p_slow) ? IN_SLOW : IN_FAST;
         page->free = false;
-#if CLUSTER_ALGO == 1
+#if PAGR_ALGO == 1
         memset(page->neighbors, 0, MAX_NEIGHBORS * sizeof(struct neighbor_page));
 #endif
         pthread_mutex_init(&page->page_lock, NULL);

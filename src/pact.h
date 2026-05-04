@@ -67,7 +67,7 @@ struct neighbor_page {
 
 struct pact_page {
     uint64_t va;
-#if CLUSTER_ALGO == 1
+#if PAGR_ALGO == 1
     uint64_t cyc;
     uint64_t ip;
 #endif
@@ -84,14 +84,24 @@ struct pact_page {
 
     UT_hash_handle hh;
     struct pact_page *next, *prev;
-#if CLUSTER_ALGO == 1
+#if PAGR_ALGO == 1
     struct neighbor_page neighbors[MAX_NEIGHBORS];
 #endif
     struct fifo_list *list;
 
+    uint64_t pagr_pred_time;
+    uint64_t hem_pred_time;
+
     // Page states
     _Atomic uint8_t in_fast;
     _Atomic bool free;
+    // Prediction states
+    unsigned int pagr_pred : 1;
+    unsigned int hem_pred : 1;
+    unsigned int pagr_accessed : 1;
+    unsigned int hem_accessed : 1;
+    unsigned int real_pred : 1;
+    unsigned int real_accessed : 1;
 } __attribute__((aligned(64)));
 
 void pact_init();

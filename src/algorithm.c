@@ -4,7 +4,7 @@
 double mig_queue_time = 0;
 double mig_move_time = 0;
 
-#if CLUSTER_ALGO == 1
+#if PAGR_ALGO == 1
 
 #define ABS(x) ((x) >= 0 ? (x) : -(x))
 #define MIN(a, b) ({ \
@@ -117,7 +117,12 @@ static double calc_distance(struct pact_page *a, struct pact_page *b) {
     // double percent_fast = pebs_stats.fast_accesses / (pebs_stats.fast_accesses + pebs_stats.slow_accesses + 1);
 
     double dist_clip = CLIP(distance, bot_dist / 10, avg_dist * 10);
-    bot_dist = update_bot(bot_dist, dist_clip);
+    double prom_hit_perc = 1 - (double)(real_prom_not_accessed) / (real_promotions + 1);
+    // higher miss percentage should make it less likely to be promoted (lower threshold)
+    // miss % = 0 -> doing great, higher threshold
+    // miss % = 1 -> doing terrible, lower threshold
+    // bot_dist = update_bot(bot_dist, dist_clip);
+    bot_dist = update_bot(bot_dist, dist_clip * prom_hit_perc * prom_hit_perc * prom_hit_perc * prom_hit_perc);
     // bot_dist = update_bot(bot_dist, distance * (1 - percent_fast * percent_fast));
 
     // when the percent is good you want it to do less (lower threshold)

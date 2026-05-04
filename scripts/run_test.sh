@@ -184,7 +184,7 @@ period=100
 page_size=4096
 
 # Make  
-run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
+run_make pebs_stats=1 pagr_algo=1 hem_algo=0 \
   bfs_algo=0 dfs_algo=1 lru_algo=1 sample_period=$period \
   record=$record fast_buffer=$f_buf page_size=$page_size
 
@@ -214,18 +214,18 @@ run_ycsb "memcache-dis" 32000 "workloada" "workloadb" "workloadc" "workloadd" "w
 # test "bfs-PAGR-${app}" "${GAPBS_DIR}" "./bfs" -g 27 -n 64 -r 0
 # ./single_plots "bfs-PAGR-${app}"
 
-# run_make cluster_algo=0 hem_algo=1 dfs_algo=0 sample_period=$period \
+# run_make pagr_algo=0 hem_algo=1 dfs_algo=0 sample_period=$period \
 #   record=$record fast_buffer=$f_buf
 # test "resnet-hem-${app}" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
 
 # echo always |  tee /sys/kernel/mm/transparent_hugepage/enabled
 # echo always |  tee /sys/kernel/mm/transparent_hugepage/defrag
 # # CGUPS
-# run_make cluster_algo=1 hem_algo=0 dfs_algo=1 lru_algo=1 \
+# run_make pagr_algo=1 hem_algo=0 dfs_algo=1 lru_algo=1 \
 #   dec_down=0.0001 dec_up=0.01 sample_period=$period record=$record fast_buffer=$f_buf
 # test "cgups-PAGR-${app}" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
-# run_make cluster_algo=0 hem_algo=1 dfs_algo=0 lru_algo=0 sample_period=$period \
+# run_make pagr_algo=0 hem_algo=1 dfs_algo=0 lru_algo=0 sample_period=$period \
 #   record=$record fast_buffer=$f_buf
 # test "cgups-hem-${app}" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
@@ -233,42 +233,42 @@ run_ycsb "memcache-dis" 32000 "workloada" "workloadb" "workloadc" "workloadd" "w
 # echo never |  tee /sys/kernel/mm/transparent_hugepage/defrag
 
 # BFS
-# run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
+# run_make pebs_stats=1 pagr_algo=1 hem_algo=0 \
 #   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
 #   max_neighbors=8 dfs_algo=1 lru_algo=1 sample_period=$period \
 #   record=$record fast_buffer=$f_buf
 # test "bfs-PAGR-${app}" "${GAPBS_DIR}" "./bfs" -g 27 -n 64 -r 0
 
-# run_make cluster_algo=0 hem_algo=1 dfs_algo=0 sample_period=$period \
+# run_make pagr_algo=0 hem_algo=1 dfs_algo=0 sample_period=$period \
 #   record=$record fast_buffer=$f_buf
 # test "bfs-hem-${app}" "${GAPBS_DIR}" "./bfs" -g 27 -n 64 -r 0
 
 # # Stream
-# run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
+# run_make pebs_stats=1 pagr_algo=1 hem_algo=0 \
 #   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
 #   max_neighbors=8 dfs_algo=1 lru_algo=1 sample_period=$period \
 #   record=$record fast_buffer=$f_buf
 # test "stream-PAGR-${app}" "${STREAM_DIR}" "./stream" 16384 50
 
-# run_make cluster_algo=0 hem_algo=1 sample_period=$period \
+# run_make pagr_algo=0 hem_algo=1 sample_period=$period \
 #   record=$record fast_buffer=$f_buf
 # test "stream-hem-${app}" "${STREAM_DIR}" "./stream" 16384 50
 
 # # BC
-# run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
+# run_make pebs_stats=1 pagr_algo=1 hem_algo=0 \
 #   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
 #   max_neighbors=8 dfs_algo=1 lru_algo=1 sample_period=$period \
 #   record=$record fast_buffer=$f_buf
 # test "bc-PAGR-${app}" "${GAPBS_DIR}" "./bc" -g 27 -n 64 -r 0
 
-# run_make cluster_algo=0 hem_algo=1 dfs_algo=0 sample_period=$period \
+# run_make pagr_algo=0 hem_algo=1 dfs_algo=0 sample_period=$period \
 #   record=$record fast_buffer=$f_buf
 # test "bc-hem-${app}" "${GAPBS_DIR}" "./bc" -g 27 -n 64 -r 0
 
 # echo never |  tee /sys/kernel/mm/transparent_hugepage/enabled
 # echo never |  tee /sys/kernel/mm/transparent_hugepage/defrag
 
-# run_make cluster_algo=1 hem_algo=0 \
+# run_make pagr_algo=1 hem_algo=0 \
 #   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
 #   max_neighbors=8 bfs_algo=0 dfs_algo=1 fast_buffer=33554432 sample_period=12800 record=0
 # test "resnet-PAGR1" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
@@ -277,12 +277,12 @@ run_ycsb "memcache-dis" 32000 "workloada" "workloadb" "workloadc" "workloadd" "w
 # echo always |  tee /sys/kernel/mm/transparent_hugepage/enabled
 # echo always |  tee /sys/kernel/mm/transparent_hugepage/defrag
 
-# run_make cluster_algo=0 hem_algo=1 dfs_algo=0 fast_buffer=0 fast_size=2147483648
-# run_make cluster_algo=1 hem_algo=0 dfs_algo=1 all_algo=0 fast_buffer=1073741824 lru_algo=1 sample_period=100
-# run_make cluster_algo=0 hem_algo=1 dfs_algo=0 fast_buffer=1073741824
+# run_make pagr_algo=0 hem_algo=1 dfs_algo=0 fast_buffer=0 fast_size=2147483648
+# run_make pagr_algo=1 hem_algo=0 dfs_algo=1 all_algo=0 fast_buffer=1073741824 lru_algo=1 sample_period=100
+# run_make pagr_algo=0 hem_algo=1 dfs_algo=0 fast_buffer=1073741824
 # test "cgups-PAGR" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
-# run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
+# run_make pebs_stats=1 pagr_algo=1 hem_algo=0 \
 #   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
 #   max_neighbors=8 bfs_algo=0 dfs_algo=1 fast_buffer=1073741824
 # test "cgups-PAGR" "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
@@ -297,74 +297,74 @@ run_ycsb "memcache-dis" 32000 "workloada" "workloadb" "workloadc" "workloadd" "w
 
 
 
-# run_make cluster_algo=0 hem_algo=1 dfs_algo=0 test "resnet-hem"
+# run_make pagr_algo=0 hem_algo=1 dfs_algo=0 test "resnet-hem"
 # "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
 
-# run_make cluster_algo=0 hem_algo=0 dfs_algo=0 test "resnet-no-155"
+# run_make pagr_algo=0 hem_algo=0 dfs_algo=0 test "resnet-no-155"
 # "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
 
 
 
 
-# run_make pebs_stats=1 cluster_algo=0 hem_algo=0 \
+# run_make pebs_stats=1 pagr_algo=0 hem_algo=0 \
 #   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
 #   max_neighbors=8 page_size=4096 bfs_algo=0 test "resnet-best-4KB"
 # "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
 
-# run_make cluster_algo=0 hem_algo=1 page_size=4096 test "resnet-hem-4KB"
+# run_make pagr_algo=0 hem_algo=1 page_size=4096 test "resnet-hem-4KB"
 # "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
 
 
-# run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
+# run_make pebs_stats=1 pagr_algo=1 hem_algo=0 \
 #   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
 #   max_neighbors=8 page_size=1048576 test "resnet-best-1MB" "${RESNET_DIR}"
 # "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
 
-# run_make cluster_algo=0 hem_algo=1 page_size=1048576 test "resnet-hem-1MB"
+# run_make pagr_algo=0 hem_algo=1 page_size=1048576 test "resnet-hem-1MB"
 # "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
 
-# run_make cluster_algo=1 hem_algo=0 page_size=262144 test
+# run_make pagr_algo=1 hem_algo=0 page_size=262144 test
 # "resnet-cluster-8MB" "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python"
 # "resnet_train.py"
 
-# run_make cluster_algo=1 hem_algo=1 page_size=262144 test "resnet-both-8MB"
+# run_make pagr_algo=1 hem_algo=1 page_size=262144 test "resnet-both-8MB"
 # "${RESNET_DIR}" "${ORIG_PWD}/venv/bin/python" "resnet_train.py"
 
 #cgups
 
-# run_make cluster_algo=0 hem_algo=0 dfs_algo=0 test "cgups-no"
+# run_make pagr_algo=0 hem_algo=0 dfs_algo=0 test "cgups-no"
 # "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
 
 
-# run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
+# run_make pebs_stats=1 pagr_algo=1 hem_algo=0 \
 #   his_size=8 pred_depth=16 dec_down=0.00005 dec_up=0.1 \
 #   max_neighbors=8 dfs_algo=1 test "cgups-PAGR" "${CGUPS_DIR}" "./gups64-rw"
 # 8 move 30 kill 60
 
-# run_make cluster_algo=1 hem_algo=1 dfs_algo=1 test "cgups-both"
+# run_make pagr_algo=1 hem_algo=1 dfs_algo=1 test "cgups-both"
 # "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
 # echo never |  tee /sys/kernel/mm/transparent_hugepage/enabled echo never |
 #  tee /sys/kernel/mm/transparent_hugepage/defrag
 
-# run_make cluster_algo=0 hem_algo=0 dfs_algo=1 test "cgups-no-reg"
+# run_make pagr_algo=0 hem_algo=0 dfs_algo=1 test "cgups-no-reg"
 # "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
-# run_make cluster_algo=0 hem_algo=1 dfs_algo=1 test "cgups-hem-reg"
+# run_make pagr_algo=0 hem_algo=1 dfs_algo=1 test "cgups-hem-reg"
 # "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
-# run_make cluster_algo=1 hem_algo=0 dfs_algo=1 test "cgups-cluster-reg"
+# run_make pagr_algo=1 hem_algo=0 dfs_algo=1 test "cgups-cluster-reg"
 # "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
-# run_make cluster_algo=1 hem_algo=1 dfs_algo=1 test "cgups-both"
+# run_make pagr_algo=1 hem_algo=1 dfs_algo=1 test "cgups-both"
 # "${CGUPS_DIR}" "./gups64-rw" 8 move 30 kill 60
 
 # #bfs THP echo always |  tee /sys/kernel/mm/transparent_hugepage/enabled
 # echo always |  tee /sys/kernel/mm/transparent_hugepage/defrag
 
 
-# run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
+# run_make pebs_stats=1 pagr_algo=1 hem_algo=0 \
 #   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
 #   max_neighbors=8 dfs_algo=1 
 # test "bfs-PAGR" "${GAPBS_DIR}" "./bfs" -f "twitter-2010.sg" -n 64 -r 0
@@ -372,24 +372,24 @@ run_ycsb "memcache-dis" 32000 "workloada" "workloadb" "workloadc" "workloadd" "w
 # Regular echo never |  tee /sys/kernel/mm/transparent_hugepage/enabled echo
 # never |  tee /sys/kernel/mm/transparent_hugepage/defrag
 
-# run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
+# run_make pebs_stats=1 pagr_algo=1 hem_algo=0 \
 #   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
 #   max_neighbors=8 dfs_algo=1 test "bfs-PAGR" "${GAPBS_DIR}" "./bfs" -f
 # "twitter-2010.sg" -n 64 -r 0
 
-# run_make cluster_algo=0 hem_algo=0 dfs_algo=0 test "bfs-no" "${GAPBS_DIR}"
+# run_make pagr_algo=0 hem_algo=0 dfs_algo=0 test "bfs-no" "${GAPBS_DIR}"
 # "./bfs" -f "twitter-2010.sg" -n 64 -r 0
 
-# run_make cluster_algo=0 hem_algo=1 dfs_algo=0 test "bfs-hem" "${GAPBS_DIR}"
+# run_make pagr_algo=0 hem_algo=1 dfs_algo=0 test "bfs-hem" "${GAPBS_DIR}"
 # "./bfs" -f "twitter-2010.sg" -n 64 -r 0
 
 
-# run_make cluster_algo=1 hem_algo=1 test "bfs-both" "${GAPBS_DIR}" "bfs" -f
+# run_make pagr_algo=1 hem_algo=1 test "bfs-both" "${GAPBS_DIR}" "bfs" -f
 # "twitter-2010.sg" -n 64 -r 0
 
 # #stream
 
-# run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
+# run_make pebs_stats=1 pagr_algo=1 hem_algo=0 \
 #   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
 #   max_neighbors=8 dfs_algo=1 test "stream-PAGR" "${STREAM_DIR}" "./stream"
 # 2048 50
@@ -397,30 +397,30 @@ run_ycsb "memcache-dis" 32000 "workloada" "workloadb" "workloadc" "workloadd" "w
 # echo never |  tee /sys/kernel/mm/transparent_hugepage/enabled echo never |
 #  tee /sys/kernel/mm/transparent_hugepage/defrag
 
-# run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
+# run_make pebs_stats=1 pagr_algo=1 hem_algo=0 \
 #   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
 #   max_neighbors=8 dfs_algo=1 test "stream-PAGR" "${STREAM_DIR}" "./stream"
 # 2048 50
 
-# run_make cluster_algo=0 hem_algo=0 test "stream-no" "${STREAM_DIR}"
+# run_make pagr_algo=0 hem_algo=0 test "stream-no" "${STREAM_DIR}"
 # "./stream" 2048 50
 
-# run_make cluster_algo=0 hem_algo=1 test "stream-hem" "${STREAM_DIR}"
+# run_make pagr_algo=0 hem_algo=1 test "stream-hem" "${STREAM_DIR}"
 # "./stream" 2048 50
 
-# run_make cluster_algo=1 hem_algo=0 test "stream-cluster" "${STREAM_DIR}"
+# run_make pagr_algo=1 hem_algo=0 test "stream-cluster" "${STREAM_DIR}"
 # "./stream" 2048 50
 
-# run_make cluster_algo=1 hem_algo=1 test "stream-both" "${STREAM_DIR}"
+# run_make pagr_algo=1 hem_algo=1 test "stream-both" "${STREAM_DIR}"
 # "./stream" 2048 50
 
-# bc run_make pebs_stats=1 cluster_algo=1 hem_algo=0 \
+# bc run_make pebs_stats=1 pagr_algo=1 hem_algo=0 \
 #   his_size=8 pred_depth=16 dec_down=0.0001 dec_up=0.01 \
 #   max_neighbors=8 dfs_algo=1 test "bc-PAGR" "${GAPBS_DIR}" "./bc" -f
 # "twitter-2010.sg" -n 64 -r 0
 
-# run_make cluster_algo=0 hem_algo=0 dfs_algo=0 test "bc-no" "${GAPBS_DIR}"
+# run_make pagr_algo=0 hem_algo=0 dfs_algo=0 test "bc-no" "${GAPBS_DIR}"
 # "./bc" -f "twitter-2010.sg" -n 64 -r 0
 
-# run_make cluster_algo=0 hem_algo=1 dfs_algo=0 test "bc-hem" "${GAPBS_DIR}"
+# run_make pagr_algo=0 hem_algo=1 dfs_algo=0 test "bc-hem" "${GAPBS_DIR}"
 # "./bc" -f "twitter-2010.sg" -n 64 -r 0

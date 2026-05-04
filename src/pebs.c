@@ -1,5 +1,14 @@
 #include "pebs.h"
 
+#include <time.h>
+
+void sleep_ms(int milliseconds) {
+    struct timespec ts;
+    ts.tv_sec = milliseconds / 1000;
+    ts.tv_nsec = (milliseconds % 1000) * 1000000;
+    nanosleep(&ts, NULL);
+}
+
 // Public variables
 
 
@@ -11,6 +20,19 @@ static _Atomic bool kill_internal_threads[NUM_INTERNAL_THREADS];
 static pthread_t internal_threads[NUM_INTERNAL_THREADS];
 
 static _Thread_local uint64_t last_cyc_cool;
+
+uint64_t real_promotions = 0;
+uint64_t real_prom_not_accessed = 0;
+static uint64_t hem_promotions = 0;
+static uint64_t pagr_promotions = 0;
+static uint64_t pagr_prom_not_accessed = 0;
+static uint64_t hem_prom_not_accessed = 0;
+static uint8_t pact_mode = PAGR_MODE;
+
+// Dynamic PEBS sampling variables
+unsigned int pact_sample_period_idx = 0;  // Start with first period (199)
+unsigned int pact_cpu_quota = PACT_CPU_QUOTA;
+_Atomic bool dynamic_pebs_enabled = true;
 
 #if HEM_ALGO == 1
 static uint64_t global_clock = 0;
@@ -36,6 +58,38 @@ static inline long perf_event_open(struct perf_event_attr *hw_event, pid_t pid, 
   return ret;
 }
 
+// Dynamic PEBS sampling helper functions
+unsigned int pact_get_sample_period(unsigned int idx) {
+    if (idx < 0)
+        return pebs_period_list[0];
+    else if (idx < PCOUNT)
+        return pebs_period_list[idx];
+    else
+        return pebs_period_list[PCOUNT - 1];
+}
+
+void pact_increase_sample_period(void) {
+    if (pact_sample_period_idx < PCOUNT - 1)
+        pact_sample_period_idx++;
+}
+
+void pact_decrease_sample_period(void) {
+    if (pact_sample_period_idx > 0)
+        pact_sample_period_idx--;
+}
+
+void pact_update_sample_period(uint64_t new_period) {
+    // Update sample period for all active perf events
+    for (int cpu_idx = 0; cpu_idx < PEBS_NPROCS; cpu_idx++) {
+        for (int evt = 0; evt < NPBUFTYPES; evt++) {
+            if (pfd[cpu_idx][evt] >= 0) {
+                ioctl(pfd[cpu_idx][evt], PERF_EVENT_IOC_PERIOD, &new_period);
+            }
+        }
+    }
+    LOG_DEBUG("PACT: Updated sample period to %lu\n", new_period);
+}
+
 static struct perf_event_mmap_page* perf_setup(__u64 config, __u64 config1, uint32_t cpu_idx, __u64 cpu, __u64 type) {
     struct perf_event_attr attr = {0};
 
@@ -44,7 +98,7 @@ static struct perf_event_mmap_page* perf_setup(__u64 config, __u64 config1, uint
 
     attr.config = config;
     attr.config1 = config1;
-    attr.sample_period = SAMPLE_PERIOD;
+    attr.sample_period = pact_get_sample_period(pact_sample_period_idx);  // Use dynamic period
 
     attr.sample_type = PERF_SAMPLE_IP | PERF_SAMPLE_TIME | PERF_SAMPLE_ADDR; // PERF_SAMPLE_TID, PERF_SAMPLE_WEIGHT
     attr.disabled = 0;
@@ -103,7 +157,7 @@ void* pebs_stats_thread() {
         uint64_t migrations = pebs_stats.promotions + pebs_stats.demotions;
         LOG_STATS("\tpromotions: [%lu]\tdemotions: [%lu]\tmigrations: [%lu]\tpebs_resets: [%lu]\tmig_move_time: [%.2f]\tmig_queue_time: [%.2f]\n", 
                 pebs_stats.promotions, pebs_stats.demotions, migrations, pebs_stats.pebs_resets, mig_move_time, mig_queue_time);
-#if CLUSTER_ALGO == 1
+#if PAGR_ALGO == 1
         LOG_STATS("\tthreshold: [%.2f]\tavg_dist: [%.2f]\tdiff: [%.2f]\n", bot_dist, avg_dist, avg_dist - bot_dist);
 #endif
 
@@ -111,6 +165,10 @@ void* pebs_stats_thread() {
 
         LOG_STATS("\tmig_failed: [%lu]\n", pebs_stats.mig_failed);
 
+        LOG_STATS("\them_prom_not_accessed: [%lu]\them_promotions: [%lu]\them_percent_prom_not_accessed: [%.2f]\n", hem_prom_not_accessed, hem_promotions, 100.0 * (hem_prom_not_accessed + 1) / (hem_promotions + 1));
+        LOG_STATS("\tpagr_prom_not_accessed: [%lu]\tpagr_promotions: [%lu]\tpagr_percent_prom_not_accessed: [%.2f]\n", pagr_prom_not_accessed, pagr_promotions, 100.0 * (pagr_prom_not_accessed + 1) / (pagr_promotions + 1));
+        LOG_STATS("\treal_promotions: [%lu]\treal_prom_not_accessed: [%lu]\treal_percent_prom_not_accessed: [%.2f]\n", real_promotions, real_prom_not_accessed, 100.0 * (real_prom_not_accessed) / (real_promotions + 1));
+        // LOG_STATS("\tpact_mode: [%s]\n", pact_mode == PAGR_MODE ? "PAGR" : "HEM");
 
 
         pebs_stats.fast_accesses = 0;
@@ -167,8 +225,9 @@ void make_hot_request(struct pact_page* page) {
             assert(page->list == &cold_list);
             page_list_remove_page(&cold_list, page);
         }
+        page->mig_start = rdtscp();
 
-#if RECORD == 1
+#if RECORD == 1 
         // record prediction
         struct pebs_rec p_rec = {
             .va = page->va,
@@ -182,7 +241,6 @@ void make_hot_request(struct pact_page* page) {
 
         assert(page->list == NULL);
         enqueue_fifo(&hot_list, page);
-        page->mig_start = rdtscp();
 
     }
 #if LRU_ALGO == 1
@@ -248,201 +306,16 @@ static uint64_t samples_since_cool = 0;
 #endif
 
 void process_perf_buffer(int cpu_idx, int evt) {
-    struct perf_event_mmap_page *p = perf_page[cpu_idx][evt];
-    uint64_t num_loops = 0;
 
-    while (p->data_head != p->data_tail && num_loops++ != 128) {
-        LOG_START_PEBS(SAMPLE_READ);
-        LOG_START_PEBS(SAMPLE);
-
-        struct perf_sample rec = {.addr = 0};
-        char *data = (char*)p + p->data_offset;
-        uint64_t avail = p->data_head - p->data_tail;
-
-        // LOG_DEBUG("Backlog: %lu\n", avail / (sizeof(struct perf_sample) + sizeof(struct perf_event_header)));
-
-        assert(((p->data_size - 1) & p->data_size) == 0);
-        assert(p->data_size != 0);
-
-        // header
-        uint64_t wrapped_tail = p->data_tail & (p->data_size - 1);
-        struct perf_event_header *hdr = (struct perf_event_header *)(data + wrapped_tail);
-
-        assert(hdr->size != 0);
-        assert(avail >= hdr->size);
-
-        if (wrapped_tail + hdr->size <= p->data_size) {
-            switch (hdr->type) {
-                case PERF_RECORD_SAMPLE:
-                    if (hdr->size - sizeof(struct perf_event_header) == sizeof(struct perf_sample)) {
-                        memcpy(&rec, data + wrapped_tail + sizeof(struct perf_event_header), sizeof(struct perf_sample));
-                        // rec = (struct perf_sample *)(data + wrapped_tail + sizeof(struct perf_event_header));
-                        // printf("addr: 0x%llx, ip: 0x%llx, time: %llu\n", rec->addr, rec->ip, rec->time);
-                    }
-                    break;
-                case PERF_RECORD_THROTTLE:
-                    pebs_stats.throttles++;
-                    break;
-                case PERF_RECORD_UNTHROTTLE:
-                    pebs_stats.unthrottles++;
-                    break;
-                default:
-                    pebs_stats.unknown_samples++;
-                    break;
-            }
-        } else {
-            pebs_stats.wrapped_records++;
-        }
-
-        p->data_tail += hdr->size;
-
- 
-        /* Have PEBS Sample, Now check with pact */
-        // continue;
-
-        if (rec.addr == 0) continue;
-        LOG_END_PEBS(SAMPLE_READ);
-        LOG_START_PEBS(SAMPLE_LOOKUP);
-
-        uint64_t addr_aligned = rec.addr & PAGE_MASK;
-        struct pact_page *page = find_page_no_lock(addr_aligned);
-
-        // Try 4KB aligned page if not 2MB aligned page
-        if (page == NULL) {
-            page = find_page_no_lock(rec.addr & BASE_PAGE_MASK);
-        }
-        LOG_END_PEBS(SAMPLE_LOOKUP);
-        if (page == NULL) {
-            continue;
-        }
-#if RECORD == 1
-        struct pebs_rec p_rec = {
-            .va = addr_aligned,
-            .ip = rec.ip,
-            .cyc = rdtscp(),
-            .cpu = cpu_idx,
-            .evt = evt
-        };
-        fwrite(&p_rec, sizeof(struct pebs_rec), 1, pact_trace_fp);
-#endif
-
-
-        if (evt == FASTREAD) {
-            page->in_fast = IN_FAST;
-            pebs_stats.fast_accesses++;
-        } else {
-            page->in_fast = IN_SLOW;
-            pebs_stats.slow_accesses++;
-        }
-        
-
-        
-        LOG_START_PEBS(SAMPLE_PRED);
-
-        // LRU cold list
-        // if sample is cold move to end of cold queue
-        // Everything in FAST is cold
-
-#if HEM_ALGO == 1
-        // cool off
-        page->accesses >>= (global_clock - page->local_clock);
-        page->local_clock = global_clock;
-
-
-        page->accesses++;
-#if CLUSTER_ALGO != 1
-        if (page->accesses >= HOT_THRESHOLD) {
-            make_hot_request(page);
-        } else {
-            make_cold_request(page);
-        }
-#endif
-        LOG_END_PEBS(SAMPLE_PRED);
-        // Sample based cooling
-        samples_since_cool++;
-        if (samples_since_cool >= SAMPLE_COOLING_THRESHOLD) {
-            global_clock++;
-            samples_since_cool = 0;
-            last_cyc_cool = rdtscp();
-        }
-
-        // uint64_t cur_cyc = rdtscp();
-
-        // Time based cooling
-        // if (cur_cyc - last_cyc_cool > CYC_COOL_THRESHOLD) {
-        //     // __atomic_fetch_add(&global_clock, 1, __ATOMIC_RELEASE);
-        //     global_clock++;
-        //     last_cyc_cool = cur_cyc;
-        // }
-
-#endif 
-
-        
-#if CLUSTER_ALGO == 1
-        if (rec.time > page->cyc) {
-            page->cyc = rec.time;
-            page->ip = rec.ip;
-        }
-        LOG_START_PEBS(PAGR_ADD_PAGE);
-
-        uint8_t err = algo_add_page(page);
-        // make_hot_request(page);
-        LOG_END_PEBS(PAGR_ADD_PAGE);
-
-        
-        double percent_fast = pebs_stats.fast_accesses / (pebs_stats.fast_accesses + pebs_stats.slow_accesses + 1);
-        if (
-#if HEM_ALGO == 1
-            page->accesses > C_HOT_THRESHOLD && 
-#endif
-            err == 0 && 
-            cold_list.numentries != 0 && 
-            percent_fast < 1) {
-            struct pact_page *pred_pages[MAX_NEIGHBORS * MAX_PRED_DEPTH];
-            uint32_t idx = 0;
-            LOG_START_PEBS(PAGR_PRED);
-            algo_predict_pages(page, pred_pages, &idx);
-            LOG_END_PEBS(PAGR_PRED);
-
-            LOG_START_PEBS(PAGR_MAKE_HOT);
-            for (uint32_t i = 0; i < idx; i++) {
-                // LOG_DEBUG("PRED: 0x%lx from 0x%lx\n", pred_pages[i]->va, page->va);
-                make_hot_request(pred_pages[i]);
-            }
-            LOG_END_PEBS(PAGR_MAKE_HOT);
-            
-        }
-        LOG_END_PEBS(SAMPLE_PRED);
-#if LRU_ALGO == 1
-        LOG_START_PEBS(SAMPLE_LRU);
-        // LRU based cold list
-        // everything in FAST is in cold list
-        // with oldest page at front of queue
-        make_cold_request(page);
-        LOG_END_PEBS(SAMPLE_LRU);
-#endif
-#endif
-        no_samples[cpu_idx][evt] = rdtscp();
-        LOG_END_PEBS(SAMPLE);
-    }
-    no_samples[cpu_idx][evt]++;
-    p->data_tail = p->data_head;
-
-    uint64_t cur_cyc = rdtscp();
-    if (cur_cyc > no_samples[cpu_idx][evt] + NO_SAMPLE_RESET_TIME) {
-        LOG_START_PEBS(SAMPLE_RESET);
-
-        pebs_stats.pebs_resets++;
-        ioctl(pfd[cpu_idx][evt], PERF_EVENT_IOC_DISABLE);
-        ioctl(pfd[cpu_idx][evt], PERF_EVENT_IOC_RESET);
-        ioctl(pfd[cpu_idx][evt], PERF_EVENT_IOC_ENABLE);
-        no_samples[cpu_idx][evt] = cur_cyc;
-        LOG_END_PEBS(SAMPLE_RESET);
-    }
 }
 
 
 void* pebs_scan_thread() {
+    struct perf_event_mmap_page *p;
+    uint64_t sleep_timeout = 2; // 2ms
+    struct perf_sample rec;
+
+    struct perf_event_header *hdr;
     internal_call = true;
     // set cpu
     cpu_set_t cpuset;
@@ -451,26 +324,284 @@ void* pebs_scan_thread() {
     // pthread_t thread_id = pthread_self();
     int s = pthread_setaffinity_np(internal_threads[PEBS_THREAD], sizeof(cpu_set_t), &cpuset);
     assert(s == 0);
-    // pebs_init();
 
-    last_cyc_cool = rdtscp();
+    // Dynamic PEBS sampling variables
+    double cpu_usage_ema = 0.0;  // Exponential moving average of CPU usage
+    struct timespec last_wall_ts;
+    struct timespec last_cpu_ts;
+    clock_gettime(CLOCK_MONOTONIC, &last_wall_ts);
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &last_cpu_ts);
+    uint64_t cpu_check_period = (uint64_t)PACT_CPU_CHECK_PERIOD_MS * 1000000ULL;
 
-    // uint64_t num_loops = 0;
-
-    
     while (true) {
+        // Check CPU usage every PACT_CPU_CHECK_PERIOD_MS milliseconds
+        struct timespec current_wall_ts;
+        clock_gettime(CLOCK_MONOTONIC, &current_wall_ts);
+        uint64_t current_walltime = (uint64_t)current_wall_ts.tv_sec * 1000000000ULL + current_wall_ts.tv_nsec;
+        uint64_t last_walltime = (uint64_t)last_wall_ts.tv_sec * 1000000000ULL + last_wall_ts.tv_nsec;
+
+        if (current_walltime - last_walltime >= cpu_check_period && dynamic_pebs_enabled) {
+            // Calculate CPU usage over the last period for this thread
+            struct timespec current_cpu_ts;
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &current_cpu_ts);
+            uint64_t current_cputime = (uint64_t)current_cpu_ts.tv_sec * 1000000000ULL + current_cpu_ts.tv_nsec;
+            uint64_t last_cputime = (uint64_t)last_cpu_ts.tv_sec * 1000000000ULL + last_cpu_ts.tv_nsec;
+
+            if (current_cputime > last_cputime) {
+                uint64_t cputime_diff = current_cputime - last_cputime;
+                uint64_t walltime_diff = current_walltime - last_walltime;
+
+                double instant_cpu_usage = (double)cputime_diff / walltime_diff * 100.0;
+
+                // Apply exponential moving average with alpha = 0.2
+                cpu_usage_ema = 0.2 * instant_cpu_usage + 0.8 * cpu_usage_ema;
+
+                LOG_DEBUG("PACT: CPU usage EMA: %.2f%%, target: %d%%\n", cpu_usage_ema, pact_cpu_quota);
+
+                // Hysteresis control: ±0.5% tolerance band
+                if (cpu_usage_ema > pact_cpu_quota + 0.5) {
+                    // CPU usage too high, increase sample period
+                    pact_increase_sample_period();
+                    uint64_t new_period = pact_get_sample_period(pact_sample_period_idx);
+                    pact_update_sample_period(new_period);
+                    LOG_DEBUG("PACT: Increased sample period to %lu (idx: %u)\n", new_period, pact_sample_period_idx);
+                } else if (cpu_usage_ema < pact_cpu_quota - 0.5) {
+                    // CPU usage too low, decrease sample period
+                    pact_decrease_sample_period();
+                    uint64_t new_period = pact_get_sample_period(pact_sample_period_idx);
+                    pact_update_sample_period(new_period);
+                    LOG_DEBUG("PACT: Decreased sample period to %lu (idx: %u)\n", new_period, pact_sample_period_idx);
+                }
+            }
+
+            last_cpu_ts = current_cpu_ts;
+            last_wall_ts = current_wall_ts;
+        }
 
         int pebs_start_cpu = 0;
         int num_cores = PEBS_NPROCS;
 
         for (int cpu_idx = pebs_start_cpu; cpu_idx < pebs_start_cpu + num_cores; cpu_idx++) {
             for(int evt = 0; evt < NPBUFTYPES; evt++) {
-                process_perf_buffer(cpu_idx, evt);
+                if (!perf_page || !perf_page[cpu_idx] || !perf_page[cpu_idx][evt]) {
+                    continue;
+                }
+                p = perf_page[cpu_idx][evt];
+                __u64 head, tail, data_offset, avail;
+                bool cond;
+
+                do {
+                    LOG_START_PEBS(SAMPLE_READ);
+                    LOG_START_PEBS(SAMPLE);
+
+                    __sync_synchronize();
+
+                    head = p->data_head;
+                    tail = p->data_tail;
+                    data_offset = p->data_offset;
+
+                    if (head == tail) {
+                        break;
+                    }
+
+                    rec.addr = 0;
+                    char *data = (char*)p + data_offset;
+                    avail = head - tail;
+
+                    if (avail > (PERF_PAGES * PEBS_MAX_SAMPLE_RATIO)) {
+                        cond = true;
+                    } else {
+                        cond = false;
+                    }
+
+                    if (avail < sizeof(struct perf_event_header)) {
+                        break;
+                    }
+
+                    uint64_t data_size = p->data_size;
+                    assert(((data_size - 1) & data_size) == 0); // ensure power of 2
+                    assert(data_size != 0);
+
+                    // header
+                    uint64_t wrapped_tail = tail & (data_size - 1);  // modulo for power of 2
+                    hdr = (struct perf_event_header *)(data + wrapped_tail);
+
+                    assert(hdr->size != 0);
+                    assert(avail >= hdr->size);
+
+                    if (wrapped_tail + hdr->size <= data_size) {
+                        switch (hdr->type) {
+                            case PERF_RECORD_SAMPLE:
+                                if (hdr->size - sizeof(struct perf_event_header) == sizeof(struct perf_sample)) {
+                                    memcpy(&rec, data + wrapped_tail + sizeof(struct perf_event_header), sizeof(struct perf_sample));
+                                }
+                                break;
+                            case PERF_RECORD_THROTTLE:
+                                pebs_stats.throttles++;
+                                break;
+                            case PERF_RECORD_UNTHROTTLE:
+                                pebs_stats.unthrottles++;
+                                break;
+                            default:
+                                pebs_stats.unknown_samples++;
+                                break;
+                        }
+                    } else {
+                        pebs_stats.wrapped_records++;
+                    }
+
+                    p->data_tail += hdr->size;
+
+                    /* Have PEBS Sample, Now check with pact */
+                    if (rec.addr == 0) continue;
+                    no_samples[cpu_idx][evt] = rdtscp();
+                    LOG_END_PEBS(SAMPLE_READ);
+                    LOG_START_PEBS(SAMPLE_LOOKUP);
+
+                    uint64_t addr_aligned = rec.addr & PAGE_MASK;
+                    struct pact_page *page = find_page_no_lock(addr_aligned);
+
+                    // Try 4KB aligned page if not 2MB aligned page
+                    if (page == NULL) {
+                        page = find_page_no_lock(rec.addr & BASE_PAGE_MASK);
+                    }
+                    LOG_END_PEBS(SAMPLE_LOOKUP);
+                    if (page == NULL) {
+                        continue;
+                    }
+            #if RECORD == 1
+                    struct pebs_rec p_rec = {
+                        .va = addr_aligned,
+                        .ip = rec.ip,
+                        .cyc = rdtscp(),
+                        .cpu = cpu_idx,
+                        .evt = evt
+                    };
+                    fwrite(&p_rec, sizeof(struct pebs_rec), 1, pact_trace_fp);
+            #endif
+                    uint64_t cur_cyc = rdtscp();
+                    if (page->pagr_pred && page->pagr_pred_time + mig_queue_time + mig_move_time < cur_cyc) {
+                        page->pagr_accessed = true;
+                    }
+                    if (page->hem_pred && page->hem_pred_time + mig_queue_time + mig_move_time < cur_cyc) {
+                        page->hem_accessed = true;
+                    }
+                    page->real_accessed = true;
+
+                    if (evt == FASTREAD) {
+                        page->in_fast = IN_FAST;
+                        pebs_stats.fast_accesses++;
+                    } else {
+                        page->in_fast = IN_SLOW;
+                        pebs_stats.slow_accesses++;
+                    }
+
+                    double pagr_prom_not_accessed_perc = (double)(pagr_prom_not_accessed + 1) / (pagr_promotions + 1);
+                    double hem_prom_not_accessed_perc = (double)(hem_prom_not_accessed + 1) / (hem_promotions + 1);
+
+                    if (pagr_prom_not_accessed_perc < hem_prom_not_accessed_perc) {
+                        pact_mode = PAGR_MODE;
+                    } else {
+                        pact_mode = HEM_MODE;
+                    }
+
+                    
+                    LOG_START_PEBS(SAMPLE_PRED);
+
+            #if HEM_ALGO == 1
+                    // cool off
+                    page->accesses >>= (global_clock - page->local_clock);
+                    page->local_clock = global_clock;
+
+                    page->accesses++;
+                    if (page->accesses >= HOT_THRESHOLD) {
+                        page->hem_accessed = false;
+                        page->hem_pred = true;
+                        page->hem_pred_time = rdtscp();
+                        if (pact_mode == HEM_MODE) {
+                            make_hot_request(page);
+                        }
+                    } else {
+                        if (pact_mode == HEM_MODE) {
+                            make_cold_request(page);
+                        }
+                    }
+                    LOG_END_PEBS(SAMPLE_PRED);
+                    // Sample based cooling
+                    samples_since_cool++;
+                    if (samples_since_cool >= SAMPLE_COOLING_THRESHOLD) {
+                        global_clock++;
+                        samples_since_cool = 0;
+                        last_cyc_cool = rdtscp();
+                    }
+            #endif 
+
+                    
+            #if PAGR_ALGO == 1
+                    if (rec.time > page->cyc) {
+                        page->cyc = rec.time;
+                        page->ip = rec.ip;
+                    }
+                    LOG_START_PEBS(PAGR_ADD_PAGE);
+
+                    uint8_t err = algo_add_page(page);
+                    LOG_END_PEBS(PAGR_ADD_PAGE);
+
+                    
+                    double percent_fast = pebs_stats.fast_accesses / (pebs_stats.fast_accesses + pebs_stats.slow_accesses + 1);
+                    if (err == 0 && cold_list.numentries != 0 && percent_fast < 1) {
+                        struct pact_page *pred_pages[MAX_NEIGHBORS * MAX_PRED_DEPTH];
+                        uint32_t idx = 0;
+                        LOG_START_PEBS(PAGR_PRED);
+                        algo_predict_pages(page, pred_pages, &idx);
+                        LOG_END_PEBS(PAGR_PRED);
+
+                        LOG_START_PEBS(PAGR_MAKE_HOT);
+                        uint64_t cur_cyc = rdtscp();
+                        for (uint32_t i = 0; i < idx; i++) {
+                            pred_pages[i]->pagr_pred = true;
+                            pred_pages[i]->pagr_accessed = false;
+                            pred_pages[i]->pagr_pred_time = cur_cyc;
+                            if (pact_mode == PAGR_MODE) {
+                                make_hot_request(pred_pages[i]);
+                            }
+                        }
+                        LOG_END_PEBS(PAGR_MAKE_HOT);
+                        
+                    }
+                    LOG_END_PEBS(SAMPLE_PRED);
+            #endif
+            #if LRU_ALGO == 1
+                    LOG_START_PEBS(SAMPLE_LRU);
+                    make_cold_request(page);
+                    LOG_END_PEBS(SAMPLE_LRU);
+            #endif
+                    LOG_END_PEBS(SAMPLE);
+                } while (cond);
+
+                no_samples[cpu_idx][evt]++;
+                uint64_t cur_cyc = rdtscp();
+                if (cur_cyc > no_samples[cpu_idx][evt] + NO_SAMPLE_RESET_TIME * pact_sample_period_idx) {
+                    pebs_stats.pebs_resets++;
+                    ioctl(pfd[cpu_idx][evt], PERF_EVENT_IOC_DISABLE);
+                    ioctl(pfd[cpu_idx][evt], PERF_EVENT_IOC_RESET);
+                    ioctl(pfd[cpu_idx][evt], PERF_EVENT_IOC_ENABLE);
+                    no_samples[cpu_idx][evt] = cur_cyc;
+
+                    // pact_increase_sample_period();
+                    // uint64_t new_period = pact_get_sample_period(pact_sample_period_idx);
+                    // pact_update_sample_period(new_period);
+                    // LOG_DEBUG("PACT: Increased sample period to %lu (idx: %u)\n", new_period, pact_sample_period_idx);
+                }
+
+                sleep_ms(sleep_timeout);
             }
         }
     }
     return NULL;
 }
+
+static uint64_t last_cyc = 0;
 
 void pact_migrate_page(struct pact_page *page, int node) {
     unsigned long nodemask = 1UL << node;
@@ -485,6 +616,9 @@ void pact_migrate_page(struct pact_page *page, int node) {
         }
     } else {
         if (node == FAST_NODE) {
+            page->real_pred = true;
+            page->real_accessed = false;
+            
 #if RECORD == 1
             // record promotion
             struct pebs_rec p_rec = {
@@ -506,6 +640,39 @@ void pact_migrate_page(struct pact_page *page, int node) {
 #endif
 
         } else {
+            if (page->real_pred) {
+                real_promotions++;
+                if (!page->real_accessed) {
+                    real_prom_not_accessed++;
+                }
+                page->real_pred = false;
+            }
+            if (page->pagr_pred) {
+                pagr_promotions++;
+                if (!page->pagr_accessed) {
+                    pagr_prom_not_accessed++;
+                }
+                page->pagr_pred = false;
+            }
+            if (page->hem_pred) {
+                hem_promotions++;
+                if (!page->hem_accessed) {
+                    hem_prom_not_accessed++;
+                }
+                page->hem_pred = false;
+            }
+
+            uint64_t cur_cyc = rdtscp();
+
+            if (cur_cyc - last_cyc > 2 * CPU_FREQ) {
+                last_cyc = cur_cyc;
+                real_promotions >>= 1;
+                real_prom_not_accessed >>= 1;
+                hem_promotions >>= 1;
+                hem_prom_not_accessed >>= 1;
+                pagr_promotions >>= 1;
+                pagr_prom_not_accessed >>= 1;
+            }
 #if RECORD == 1
             // record demotion
             struct pebs_rec p_rec = {
@@ -662,7 +829,7 @@ void pebs_init(void) {
 
     start_pebs_thread();
 
-#if HEM_ALGO == 1 || CLUSTER_ALGO == 1
+#if HEM_ALGO == 1 || PAGR_ALGO == 1
     start_promote_thread();
 
     start_demote_thread();

@@ -9,7 +9,7 @@ extern double mig_move_time;
 extern double mig_queue_time;
 
 
-#if CLUSTER_ALGO == 1
+#if PAGR_ALGO == 1
 /*
     To get neighborint pages:
     Look at pages in the future

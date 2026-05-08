@@ -28,6 +28,8 @@ static uint64_t pagr_promotions = 0;
 static uint64_t pagr_prom_not_accessed = 0;
 static uint64_t hem_prom_not_accessed = 0;
 static uint8_t pact_mode = PAGR_MODE;
+static double cpu_usage_ema = 0.0;  // Exponential moving average of CPU usage
+
 
 // Dynamic PEBS sampling variables
 unsigned int pact_sample_period_idx = 0;  // Start with first period (199)
@@ -169,6 +171,7 @@ void* pebs_stats_thread() {
         LOG_STATS("\tpagr_prom_not_accessed: [%lu]\tpagr_promotions: [%lu]\tpagr_percent_prom_not_accessed: [%.2f]\n", pagr_prom_not_accessed, pagr_promotions, 100.0 * (pagr_prom_not_accessed + 1) / (pagr_promotions + 1));
         LOG_STATS("\treal_promotions: [%lu]\treal_prom_not_accessed: [%lu]\treal_percent_prom_not_accessed: [%.2f]\n", real_promotions, real_prom_not_accessed, 100.0 * (real_prom_not_accessed) / (real_promotions + 1));
         // LOG_STATS("\tpact_mode: [%s]\n", pact_mode == PAGR_MODE ? "PAGR" : "HEM");
+        LOG_STATS("\tpact_sample_period: [%u]\tpact_pebs_usage: [%.2f]\n", pact_get_sample_period(pact_sample_period_idx), cpu_usage_ema);
 
 
         pebs_stats.fast_accesses = 0;
@@ -326,7 +329,6 @@ void* pebs_scan_thread() {
     assert(s == 0);
 
     // Dynamic PEBS sampling variables
-    double cpu_usage_ema = 0.0;  // Exponential moving average of CPU usage
     struct timespec last_wall_ts;
     struct timespec last_cpu_ts;
     clock_gettime(CLOCK_MONOTONIC, &last_wall_ts);
@@ -383,7 +385,7 @@ void* pebs_scan_thread() {
 
         for (int cpu_idx = pebs_start_cpu; cpu_idx < pebs_start_cpu + num_cores; cpu_idx++) {
             for(int evt = 0; evt < NPBUFTYPES; evt++) {
-                if (!perf_page || !perf_page[cpu_idx] || !perf_page[cpu_idx][evt]) {
+                if (!perf_page[cpu_idx][evt]) {
                     continue;
                 }
                 p = perf_page[cpu_idx][evt];
@@ -571,6 +573,17 @@ void* pebs_scan_thread() {
                     }
                     LOG_END_PEBS(SAMPLE_PRED);
             #endif
+            // #if SEQ_ALGO == 1
+                    struct pact_page *next_page = find_page_no_lock(addr_aligned + PAGE_SIZE);
+
+                    // Try 4KB aligned page if not 2MB aligned page
+                    if (next_page != NULL) {
+                        LOG_DEBUG("Found sequential page: 0x%lx\n", next_page->va);
+                        make_hot_request(next_page);
+                    } else {
+                        LOG_DEBUG("No sequential page found for address: 0x%lx\n", addr_aligned + PAGE_SIZE);
+                    }
+            // #endif
             #if LRU_ALGO == 1
                     LOG_START_PEBS(SAMPLE_LRU);
                     make_cold_request(page);
@@ -581,7 +594,7 @@ void* pebs_scan_thread() {
 
                 no_samples[cpu_idx][evt]++;
                 uint64_t cur_cyc = rdtscp();
-                if (cur_cyc > no_samples[cpu_idx][evt] + NO_SAMPLE_RESET_TIME * pact_sample_period_idx) {
+                if (cur_cyc > no_samples[cpu_idx][evt] + NO_SAMPLE_RESET_TIME * (pact_sample_period_idx + 1)) {
                     pebs_stats.pebs_resets++;
                     ioctl(pfd[cpu_idx][evt], PERF_EVENT_IOC_DISABLE);
                     ioctl(pfd[cpu_idx][evt], PERF_EVENT_IOC_RESET);
@@ -594,9 +607,10 @@ void* pebs_scan_thread() {
                     // LOG_DEBUG("PACT: Increased sample period to %lu (idx: %u)\n", new_period, pact_sample_period_idx);
                 }
 
-                sleep_ms(sleep_timeout);
+                
             }
         }
+        sleep_ms(sleep_timeout);
     }
     return NULL;
 }

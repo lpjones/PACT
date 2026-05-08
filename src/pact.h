@@ -65,7 +65,7 @@ struct neighbor_page {
     uint64_t time_diff;
 };
 
-struct pact_page {
+struct __attribute__((packed)) pact_page {
     uint64_t va;
 #if PAGR_ALGO == 1
     uint64_t cyc;
@@ -102,7 +102,7 @@ struct pact_page {
     unsigned int hem_accessed : 1;
     unsigned int real_pred : 1;
     unsigned int real_accessed : 1;
-} __attribute__((aligned(64)));
+};
 
 void pact_init();
 void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);

@@ -57,7 +57,7 @@
 // Dynamic PEBS sampling parameters (similar to memtis)
 #define PACT_SAMPLE_PERIOD_MIN_RATIO 50  // 50%
 #define PACT_SAMPLE_PERIOD_MAX_RATIO 10  // 10%
-#define PACT_CPU_QUOTA 3  // 3% target CPU usage
+#define PACT_CPU_QUOTA 10  // 10% target CPU usage
 #define PACT_CPU_CHECK_PERIOD_MS 1000  // 1 second
 #define PACT_SAMPLE_SLEEP_US 2000  // 2ms between sample processing iterations
 

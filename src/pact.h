@@ -65,7 +65,9 @@ struct neighbor_page {
     uint64_t time_diff;
 };
 
-struct __attribute__((packed)) pact_page {
+struct pact_page {
+    pthread_mutex_t page_lock;
+
     uint64_t va;
 #if PAGR_ALGO == 1
     uint64_t cyc;
@@ -80,7 +82,6 @@ struct __attribute__((packed)) pact_page {
 #endif
 
     uint64_t mig_start;
-    pthread_mutex_t page_lock;
 
     UT_hash_handle hh;
     struct pact_page *next, *prev;

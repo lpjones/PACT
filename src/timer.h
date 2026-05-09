@@ -10,8 +10,15 @@
 #include <assert.h>
 #include <stdint.h>
 
-uint64_t get_time(void);
-double elapsed_time(uint64_t start, uint64_t end);
-uint64_t rdtscp(void);
+inline double elapsed_time(uint64_t start, uint64_t end) {
+    return (double)(end - start) / (double)CPU_FREQ;
+}
+
+inline uint64_t rdtscp(void) {
+    uint32_t eax, edx;
+    // why is "ecx" in clobber list here, anyway? -SG&MH,2017-10-05
+    __asm volatile ("rdtscp" : "=a" (eax), "=d" (edx) :: "ecx", "memory");
+    return ((uint64_t)edx << 32) | eax;
+}
 
 #endif

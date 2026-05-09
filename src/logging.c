@@ -50,7 +50,7 @@ void init_log_files() {
 #endif
 
 #if RECORD_TIMING == 1
-    pebs_fp = fopen("pebs.bin", "wb");
+    pebs_fp = fopen("pebs_timings.bin", "wb");
     assert(pebs_fp != NULL);
 
     promote_fp = fopen("promote.bin", "wb");
@@ -63,5 +63,5 @@ void init_log_files() {
     internal_call = false;
 
     // reference start time
-    log_start_time = get_time();
+    log_start_time = rdtscp();
 }

@@ -42,10 +42,10 @@ static int mmap_filter(void *addr, size_t length, int prot, int flags, int fd, o
       return 1;
     }
 
-    // if (length < PAGE_SIZE) {
-    //   LOG_DEBUG("MMAP: allocation too small: mmap(%p, %lu, %d, %d, %d, %lu)\n", addr, length, prot, flags, fd, offset);
-    //   return 1;
-    // }
+    if (length < PAGE_SIZE) {
+      LOG_DEBUG("MMAP: allocation too small: mmap(%p, %lu, %d, %d, %d, %lu)\n", addr, length, prot, flags, fd, offset);
+      return 1;
+    }
 
     *result = (uint64_t)pact_mmap(addr, length, prot, flags, fd, offset);
     if (*result == (uint64_t)MAP_FAILED) {

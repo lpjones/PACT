@@ -15,57 +15,111 @@ long slow_used = 0;
 static uint64_t max_pact_va = 0;
 static uint64_t min_pact_va = UINT64_MAX;
 
+#define RAM_SIZE (64UL * 1024UL * 1024UL * 1024UL)   // 64GB
+#define MAX_PAGES (RAM_SIZE / PAGE_SIZE)
+#define LOG2_PAGE_SIZE (__builtin_ctzl(PAGE_SIZE))
+#define PAGE_LOOKUP(va) (((va) >> LOG2_PAGE_SIZE) % MAX_PAGES)
+
+static struct pact_page pact_page_table[MAX_PAGES] = {0};
+
 _Atomic bool fast_lock = false;
 
-// If the allocations are smaller than the PAGE_SIZE it's possible to 
-void add_page(struct pact_page *page) {
-    struct pact_page *p;
-    pthread_mutex_lock(&pages_lock);
+// DOES NOT UNLOCK PAGE, caller is responsible for unlocking
+struct pact_page* find_page(uint64_t va) {
+    uint64_t idx = PAGE_LOOKUP(va);
 
-    // struct pact_page *cur_page, *tmp;
-    // LOG_DEBUG("pages: ");
-    // HASH_ITER(hh, pages, cur_page, tmp) {
-    //     LOG_DEBUG("0x%lx, ", cur_page->va);
-    // }
-    // LOG_DEBUG("\n");
+    pthread_mutex_lock(&pact_page_table[idx].page_lock);
 
-    HASH_FIND(hh, pages, &(page->va), sizeof(uint64_t), p);
-    if (p != NULL) {
-        LOG_DEBUG("add_page: duplicate page: 0x%lx\n", page->va);
-        // free(page);
-        pthread_mutex_unlock(&pages_lock);
-        return;
+    // Find matching va in table (handle collisions with linear probing)
+    while (!pact_page_table[idx].free && pact_page_table[idx].va != va) {
+        pthread_mutex_unlock(&pact_page_table[idx].page_lock);
+        idx = (idx + 1) % MAX_PAGES;
+        pthread_mutex_lock(&pact_page_table[idx].page_lock);
     }
-    assert(p == NULL);
-    HASH_ADD(hh, pages, va, sizeof(uint64_t), page);
-    pthread_mutex_unlock(&pages_lock);
+    if (!pact_page_table[idx].free && pact_page_table[idx].va == va) {
+        return &pact_page_table[idx];   // DOES NOT UNLOCK PAGE, caller is responsible for unlocking
+    }
+    pthread_mutex_unlock(&pact_page_table[idx].page_lock);
+    return NULL;
+
 }
 
-void remove_page(struct pact_page *page)
-{
-  pthread_mutex_lock(&pages_lock);
-  HASH_DEL(pages, page);
-  pthread_mutex_unlock(&pages_lock);
+void add_page(uint64_t va, uint8_t in_fast) {
+    uint64_t idx = PAGE_LOOKUP(va);
+
+    pthread_mutex_lock(&pact_page_table[idx].page_lock);
+
+    // Find free page in table
+    while (!pact_page_table[idx].free) {
+        LOG_DEBUG("add_page: duplicate page: 0x%lx\n", va);
+        pthread_mutex_unlock(&pact_page_table[idx].page_lock);
+        idx = (idx + 1) % MAX_PAGES;
+        pthread_mutex_lock(&pact_page_table[idx].page_lock);
+    }
+
+    // Initialize page
+    pact_page_table[idx].va = va;
+#if PAGR_ALGO == 1
+    pact_page_table[idx].cyc = 0;
+    pact_page_table[idx].ip = 0;
+#endif
+    pact_page_table[idx].accesses = 0;
+
+#if HEM_ALGO == 1
+    pact_page_table[idx].local_clock = 0;
+#endif
+
+    pact_page_table[idx].mig_start = 0;
+
+#if PAGR_ALGO == 1
+    memset(pact_page_table[idx].neighbors, 0, MAX_NEIGHBORS * sizeof(struct neighbor_page));
+#endif
+    if (in_fast == IN_FAST) {
+        enqueue_fifo(&cold_list, &pact_page_table[idx]);
+    }
+
+    pact_page_table[idx].pagr_pred_time = 0;
+    pact_page_table[idx].hem_pred_time = 0;
+
+    pact_page_table[idx].in_fast = in_fast;
+    pact_page_table[idx].free = false;
+
+    pact_page_table[idx].pagr_pred = 0;
+    pact_page_table[idx].hem_pred = 0;
+    pact_page_table[idx].pagr_accessed = 0;
+    pact_page_table[idx].hem_accessed = 0;
+    pact_page_table[idx].real_pred = 0;
+    pact_page_table[idx].real_accessed = 0;
+
+    pthread_mutex_unlock(&pact_page_table[idx].page_lock);
+    LOG_DEBUG("Added page: 0x%lx, in_fast: %d\n", va, in_fast);
 }
 
 struct pact_page* find_page_no_lock(uint64_t va) {
-    struct pact_page *page;
-    if (pthread_mutex_trylock(&pages_lock) != 0) {
-        return NULL;    // Abort early so no waiting
+    uint64_t idx = PAGE_LOOKUP(va);
+    uint64_t start_idx = idx;
+
+    while (true) {
+        if (pact_page_table[idx].free) {
+            return NULL;
+        }
+        if (pact_page_table[idx].va == va) {
+            if (pthread_mutex_trylock(&pact_page_table[idx].page_lock) != 0) {
+                return NULL;    // Abort early so no waiting
+            }
+            if (pact_page_table[idx].free || pact_page_table[idx].va != va) {
+                pthread_mutex_unlock(&pact_page_table[idx].page_lock);
+                return NULL;
+            }
+            return &pact_page_table[idx];   // DOES NOT UNLOCK PAGE, caller is responsible for unlocking
+        }
+        idx = (idx + 1) % MAX_PAGES;
+        if (idx == start_idx) {
+            return NULL;
+        }
     }
-    HASH_FIND(hh, pages, &va, sizeof(uint64_t), page);
-    pthread_mutex_unlock(&pages_lock);
-    return page;
 }
 
-struct pact_page* find_page(uint64_t va)
-{
-  struct pact_page *page;
-  pthread_mutex_lock(&pages_lock);
-  HASH_FIND(hh, pages, &va, sizeof(uint64_t), page);
-  pthread_mutex_unlock(&pages_lock);
-  return page;
-}
 
 void pact_init() {
     internal_call = true;
@@ -78,12 +132,19 @@ void pact_init() {
     // the set FAST capacity
     numa_set_preferred(FAST_NODE);
 
+    LOG_DEBUG("pact_page_table size: %lu\n", sizeof(pact_page_table));
     LOG_DEBUG("pact_page size: %lu\n", sizeof(struct pact_page));
+    LOG_DEBUG("pact_page_table num pages: %lu\n", sizeof(pact_page_table) / sizeof(struct pact_page));
+
+    // Initialize all locks and all pages as free
+    for (uint64_t i = 0; i < RAM_SIZE / PAGE_SIZE; i++) {
+        pact_page_table[i].free = true;
+        pthread_mutex_init(&pact_page_table[i].page_lock, NULL);
+    }
 
     LOG_DEBUG("finished pact_init\n");
 
-    struct pact_page *dummy_page = calloc(1, sizeof(struct pact_page));
-    add_page(dummy_page);
+    
 
     // check how much free space on fast
 #if FAST_BUFFER != 0
@@ -110,7 +171,7 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
     unsigned long slow_nodemask = 1UL << SLOW_NODE;
     void *p_fast = NULL, *p_slow = NULL;
 
-
+    /* Allocating Memory to return to user program */
 
     void *p = libc_mmap(addr, length, prot, flags & ~MAP_POPULATE, fd, offset); // Remove MAP_POPULATE until after mbind to prevent faulting and then migrating
     assert(p != MAP_FAILED);
@@ -174,8 +235,6 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         }
     }
     
-
-
     // LOG_DEBUG("fast_size: %ld, fast_free: %ld\n", fast_size, fast_free);
     if (p == MAP_FAILED) {
         LOG_DEBUG("mmap failed\n");
@@ -185,118 +244,19 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
 
     assert((uint64_t)p % BASE_PAGE_SIZE == 0);
 
-    // recycle pages from free_pact_pages
-    uint64_t num_pact_pages_needed = (length + PAGE_SIZE - 1) / PAGE_SIZE;
-    uint64_t i = 0;
-    for (i = 0; free_list.numentries > 0 && num_pact_pages_needed > 0; i++) {
-        // printf("recycling pages\n");
-        struct pact_page *page = dequeue_fifo(&free_list);
-        if (page == NULL) break;
-        pthread_mutex_lock(&page->page_lock);
+    /* End of User program Memory allocation */
+    /* Add pages to pact_page_table */
 
-        // use lock to cause atomic update of page
-        assert(page->free);
-        page->va_start = p + (i * PAGE_SIZE);
-        if (length - (i * PAGE_SIZE) < PAGE_SIZE) {
-            page->va = (uint64_t)(page->va_start);
-            page->size = length - (i * PAGE_SIZE);
-            if (page->size < BASE_PAGE_SIZE) page->size = BASE_PAGE_SIZE;   // Always at least 4KB
-        } else {
-            page->size = PAGE_SIZE;
-            // Align va to PAGE_SIZE address for future lookups in hashmap
-            page->va = PAGE_ROUND_UP((uint64_t)(page->va_start));
-        }
-        if (page->va > max_pact_va) max_pact_va = page->va;
-        if (page->va < min_pact_va) min_pact_va = page->va;
-#if HEM_ALGO == 1
-        page->accesses = 0;
-        page->local_clock = 0;
-#endif
-#if PAGR_ALGO == 1
-        page->cyc = 0;
-        page->ip = 0;
-#endif
+    assert(length >= PAGE_SIZE);
 
-        // page->prev = NULL;
-        // page->next = NULL;
-
-
-        page->in_fast = (page->va_start >= p_slow) ? IN_SLOW : IN_FAST;
-        page->free = false;
-#if PAGR_ALGO == 1
-        memset(page->neighbors, 0, MAX_NEIGHBORS * sizeof(struct neighbor_page));
-#endif
-
-        assert(page->list == NULL);
-        if (page->in_fast == IN_FAST) {
-            enqueue_fifo(&cold_list, page);
-        }
-
-        pthread_mutex_unlock(&page->page_lock);
-
-        // pthread_mutex_init(&page->page_lock, NULL);
-
-        // LOG_DEBUG("adding recycled page: 0x%lx\n", (uint64_t)page);
-        add_page(page);
-        num_pact_pages_needed--;
+    // Split allocation into PAGE_SIZE chunks and add to pact_page_table
+    for (uint64_t i = 0; i < length; i += PAGE_SIZE) {
+        uint64_t va = (uint64_t)p + i;
+        uint8_t in_fast = (va >= (uint64_t)p_slow) ? IN_SLOW : IN_FAST;
+        add_page(va, in_fast);
     }
 
-    if (num_pact_pages_needed == 0) {
-        internal_call = false; 
-        return p;
-    }
 
-    uint64_t pages_mmap_size = num_pact_pages_needed * sizeof(struct pact_page);
-    void *pages_ptr = libc_mmap(NULL, pages_mmap_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-    assert(pages_ptr != MAP_FAILED);
-    pebs_stats.internal_mem_overhead += pages_mmap_size;
-    
-    for (uint64_t j = 0; num_pact_pages_needed > 0; j++) {
-        // struct pact_page* page = create_pact_page(page_boundry, pages_ptr);
-        struct pact_page *page = (struct pact_page *)(pages_ptr + (j * sizeof(struct pact_page)));
-
-        // Don't need lock since first creation of page so no threads have cached data on it
-        page->va_start = p + (i * PAGE_SIZE);
-        if (length - (i * PAGE_SIZE) < PAGE_SIZE) {
-            page->va = (uint64_t)(page->va_start);
-            page->size = length - (i * PAGE_SIZE);
-            if (page->size < BASE_PAGE_SIZE) page->size = BASE_PAGE_SIZE;   // Always at least 4KB
-        } else {
-            page->size = PAGE_SIZE;
-            // Align va to PAGE_SIZE address for future lookups in hashmap
-            page->va = PAGE_ROUND_UP((uint64_t)(page->va_start));
-        }
-        if (page->va > max_pact_va) max_pact_va = page->va;
-        if (page->va < min_pact_va) min_pact_va = page->va;
-#if HEM_ALGO == 1
-        page->accesses = 0;
-        page->local_clock = 0;
-#endif
-#if PAGR_ALGO == 1
-        page->cyc = 0;
-        page->ip = 0;
-#endif
-
-        page->prev = NULL;
-        page->next = NULL;
-
-        page->in_fast = (page->va_start >= p_slow) ? IN_SLOW : IN_FAST;
-        page->free = false;
-#if PAGR_ALGO == 1
-        memset(page->neighbors, 0, MAX_NEIGHBORS * sizeof(struct neighbor_page));
-#endif
-        pthread_mutex_init(&page->page_lock, NULL);
-        page->list = NULL;
-        if (page->in_fast == IN_FAST) {
-            enqueue_fifo(&cold_list, page);
-        }
-
-        
-        // LOG_DEBUG("adding page: 0x%lx\n", (uint64_t)page);
-        add_page(page);
-        num_pact_pages_needed--;
-        i++;
-    }
     internal_call = false;
     return p;
 }
@@ -317,19 +277,14 @@ int pact_munmap(void *addr, size_t length) {
         }
         struct pact_page *page = find_page(va);
         if (page != NULL) {
-            pthread_mutex_lock(&page->page_lock);
             assert(page->free == false);
             page->free = true;
-            remove_page(page);
-            // if (page->in_fast == IN_FAST) {
-            //     fast_used -= page->size;
-            // }
-            pebs_stats.mem_allocated -= page->size;
+
+            pebs_stats.mem_allocated -= PAGE_SIZE;
 
             if (page->list != NULL) {
                 page_list_remove_page(page->list, page);
             }
-            enqueue_fifo(&free_list, page);
 
             pthread_mutex_unlock(&page->page_lock);
         }

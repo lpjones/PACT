@@ -336,6 +336,7 @@ void* pebs_scan_thread() {
     uint64_t cpu_check_period = (uint64_t)PACT_CPU_CHECK_PERIOD_MS * 1000000ULL;
 
     while (true) {
+        LOG_START_PEBS(CPU_USAGE);
         // Check CPU usage every PACT_CPU_CHECK_PERIOD_MS milliseconds
         struct timespec current_wall_ts;
         clock_gettime(CLOCK_MONOTONIC, &current_wall_ts);
@@ -378,6 +379,7 @@ void* pebs_scan_thread() {
 
             last_cpu_ts = current_cpu_ts;
             last_wall_ts = current_wall_ts;
+            LOG_END_PEBS(CPU_USAGE);
         }
 
         int pebs_start_cpu = 0;
@@ -394,7 +396,7 @@ void* pebs_scan_thread() {
 
                 do {
                     LOG_START_PEBS(SAMPLE_READ);
-                    LOG_START_PEBS(SAMPLE);
+                    LOG_START_PEBS(SAMPLE_WHOLE);
 
                     __sync_synchronize();
 
@@ -463,14 +465,11 @@ void* pebs_scan_thread() {
                     uint64_t addr_aligned = rec.addr & PAGE_MASK;
                     struct pact_page *page = find_page_no_lock(addr_aligned);
 
-                    // Try 4KB aligned page if not 2MB aligned page
-                    if (page == NULL) {
-                        page = find_page_no_lock(rec.addr & BASE_PAGE_MASK);
-                    }
                     LOG_END_PEBS(SAMPLE_LOOKUP);
                     if (page == NULL) {
                         continue;
                     }
+                    pthread_mutex_unlock(&page->page_lock);   // Unlock page after lookup since rest of processing is best effort and to speed up PEBS thread
             #if RECORD == 1
                     struct pebs_rec p_rec = {
                         .va = addr_aligned,
@@ -482,6 +481,8 @@ void* pebs_scan_thread() {
                     fwrite(&p_rec, sizeof(struct pebs_rec), 1, pact_trace_fp);
             #endif
                     uint64_t cur_cyc = rdtscp();
+                    LOG_START_PEBS(MODE_SWITCH);
+
                     if (page->pagr_pred && page->pagr_pred_time + mig_queue_time + mig_move_time < cur_cyc) {
                         page->pagr_accessed = true;
                     }
@@ -489,14 +490,6 @@ void* pebs_scan_thread() {
                         page->hem_accessed = true;
                     }
                     page->real_accessed = true;
-
-                    if (evt == FASTREAD) {
-                        page->in_fast = IN_FAST;
-                        pebs_stats.fast_accesses++;
-                    } else {
-                        page->in_fast = IN_SLOW;
-                        pebs_stats.slow_accesses++;
-                    }
 
                     double pagr_prom_not_accessed_perc = (double)(pagr_prom_not_accessed + 1) / (pagr_promotions + 1);
                     double hem_prom_not_accessed_perc = (double)(hem_prom_not_accessed + 1) / (hem_promotions + 1);
@@ -506,12 +499,20 @@ void* pebs_scan_thread() {
                     } else {
                         pact_mode = HEM_MODE;
                     }
+                    LOG_END_PEBS(MODE_SWITCH);
 
-                    
-                    LOG_START_PEBS(SAMPLE_PRED);
+                    if (evt == FASTREAD) {
+                        page->in_fast = IN_FAST;
+                        pebs_stats.fast_accesses++;
+                    } else {
+                        page->in_fast = IN_SLOW;
+                        pebs_stats.slow_accesses++;
+                    }
+
 
             #if HEM_ALGO == 1
                     // cool off
+                    LOG_START_PEBS(HEM_PRED);
                     page->accesses >>= (global_clock - page->local_clock);
                     page->local_clock = global_clock;
 
@@ -528,7 +529,6 @@ void* pebs_scan_thread() {
                             make_cold_request(page);
                         }
                     }
-                    LOG_END_PEBS(SAMPLE_PRED);
                     // Sample based cooling
                     samples_since_cool++;
                     if (samples_since_cool >= SAMPLE_COOLING_THRESHOLD) {
@@ -536,10 +536,13 @@ void* pebs_scan_thread() {
                         samples_since_cool = 0;
                         last_cyc_cool = rdtscp();
                     }
+                    LOG_END_PEBS(HEM_PRED);
+
             #endif 
 
                     
             #if PAGR_ALGO == 1
+                    LOG_START_PEBS(PAGR_PRED);
                     if (rec.time > page->cyc) {
                         page->cyc = rec.time;
                         page->ip = rec.ip;
@@ -554,9 +557,7 @@ void* pebs_scan_thread() {
                     if (err == 0 && cold_list.numentries != 0 && percent_fast < 1) {
                         struct pact_page *pred_pages[MAX_NEIGHBORS * MAX_PRED_DEPTH];
                         uint32_t idx = 0;
-                        LOG_START_PEBS(PAGR_PRED);
                         algo_predict_pages(page, pred_pages, &idx);
-                        LOG_END_PEBS(PAGR_PRED);
 
                         LOG_START_PEBS(PAGR_MAKE_HOT);
                         uint64_t cur_cyc = rdtscp();
@@ -571,25 +572,25 @@ void* pebs_scan_thread() {
                         LOG_END_PEBS(PAGR_MAKE_HOT);
                         
                     }
-                    LOG_END_PEBS(SAMPLE_PRED);
+                    LOG_END_PEBS(PAGR_PRED);
             #endif
             // #if SEQ_ALGO == 1
-                    struct pact_page *next_page = find_page_no_lock(addr_aligned + PAGE_SIZE);
+                    // struct pact_page *next_page = find_page_no_lock(addr_aligned + PAGE_SIZE);
 
-                    // Try 4KB aligned page if not 2MB aligned page
-                    if (next_page != NULL) {
-                        LOG_DEBUG("Found sequential page: 0x%lx\n", next_page->va);
-                        make_hot_request(next_page);
-                    } else {
-                        LOG_DEBUG("No sequential page found for address: 0x%lx\n", addr_aligned + PAGE_SIZE);
-                    }
+                    // // Try 4KB aligned page if not 2MB aligned page
+                    // if (next_page != NULL) {
+                    //     LOG_DEBUG("Found sequential page: 0x%lx\n", next_page->va);
+                    //     make_hot_request(next_page);
+                    // } else {
+                    //     LOG_DEBUG("No sequential page found for address: 0x%lx\n", addr_aligned + PAGE_SIZE);
+                    // }
             // #endif
             #if LRU_ALGO == 1
                     LOG_START_PEBS(SAMPLE_LRU);
                     make_cold_request(page);
                     LOG_END_PEBS(SAMPLE_LRU);
             #endif
-                    LOG_END_PEBS(SAMPLE);
+                    LOG_END_PEBS(SAMPLE_WHOLE);
                 } while (cond);
 
                 no_samples[cpu_idx][evt]++;
@@ -619,7 +620,7 @@ static uint64_t last_cyc = 0;
 
 void pact_migrate_page(struct pact_page *page, int node) {
     unsigned long nodemask = 1UL << node;
-    if (mbind(page->va_start, page->size, MPOL_BIND, &nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
+    if (mbind((void *)page->va, PAGE_SIZE, MPOL_BIND, &nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
         perror("mbind");
         // LOG_DEBUG("mbind failed %p\n", page->va_start);
         pebs_stats.mig_failed++;
@@ -753,7 +754,7 @@ void *demote_thread() {
             fwrite(&p_rec, sizeof(struct pebs_rec), 1, demote_pred_fp);
 #endif
             pact_migrate_page(cold_page, SLOW_NODE);
-            bytes_demoted += cold_page->size;
+            bytes_demoted += PAGE_SIZE;
             // LOG_DEBUG("MIG: demoted 0x%lx\n", cold_page->va);
             pthread_mutex_unlock(&cold_page->page_lock);
         }

@@ -18,20 +18,18 @@ extern uint64_t log_start_time;
 
 // PEBS profiling enum
 enum {
-    SAMPLE,
+    CPU_USAGE,
+    SAMPLE_WHOLE,
     SAMPLE_READ,
     SAMPLE_LOOKUP,
+    MODE_SWITCH,
     SAMPLE_COOL,
-    SAMPLE_PRED,
-#if PAGR_ALGO == 1
+    HEM_PRED,
+    PAGR_PRED,
     PAGR_ADD_PAGE,
     PAGR_UPDATE_NEIGHBOR,
-    PAGR_PRED,
     PAGR_MAKE_HOT,
-#endif
-#if LRU_ALGO == 1
     SAMPLE_LRU,
-#endif
     SAMPLE_FINISH,
     SAMPLE_RESET,
     PEBS_PROF_NP
@@ -52,7 +50,7 @@ extern uint64_t pebs_start_times[PEBS_PROF_NP];
 
 #define LOG_DEBUG(...)                                                      \
     do {                                                                    \
-        fprintf(debug_fp, "[%.9f]\t", elapsed_time(log_start_time, get_time()));                  \
+        fprintf(debug_fp, "[%.9f]\t", elapsed_time(log_start_time, rdtscp()));                  \
         fprintf(debug_fp, __VA_ARGS__);                                      \
         fflush(debug_fp);                                                    \
     } while (0)
@@ -65,11 +63,11 @@ extern uint64_t pebs_start_times[PEBS_PROF_NP];
 #if RECORD_TIMING == 1
 #define LOG_START_PEBS(grp)                                                   \
     do {                     \
-        pebs_start_times[grp] = get_time();                                                \
+        pebs_start_times[grp] = rdtscp();                                                \
     } while (0);
 #define LOG_END_PEBS(grp) \
     do { \
-        pebs_prof_buf[pebs_prof_idx].ts = elapsed_time(log_start_time, get_time()); \
+        pebs_prof_buf[pebs_prof_idx].ts = elapsed_time(pebs_start_times[grp], rdtscp()); \
         pebs_prof_buf[pebs_prof_idx++].group = (grp); \
         \
         if (pebs_prof_idx >= PEBS_PROF_BUF_SIZE) {                          \

@@ -16,48 +16,64 @@ static uint64_t max_pact_va = 0;
 static uint64_t min_pact_va = UINT64_MAX;
 
 #define RAM_SIZE (64UL * 1024UL * 1024UL * 1024UL)   // 64GB
-#define MAX_PAGES (RAM_SIZE / PAGE_SIZE)
+#define MAX_PAGES (4 * RAM_SIZE / PAGE_SIZE)   // Max number of pages we can track, set to 4x to reduce collisions
 #define LOG2_PAGE_SIZE (__builtin_ctzl(PAGE_SIZE))
 #define PAGE_LOOKUP(va) (((va) >> LOG2_PAGE_SIZE) % MAX_PAGES)
 
-static struct pact_page pact_page_table[MAX_PAGES] = {0};
+static struct pact_page *pact_page_table = NULL;
+static uint64_t num_pages = 0;
 
 _Atomic bool fast_lock = false;
 
 // DOES NOT UNLOCK PAGE, caller is responsible for unlocking
 struct pact_page* find_page(uint64_t va) {
     uint64_t idx = PAGE_LOOKUP(va);
+    uint64_t start_idx = idx;
 
     pthread_mutex_lock(&pact_page_table[idx].page_lock);
 
     // Find matching va in table (handle collisions with linear probing)
-    while (!pact_page_table[idx].free && pact_page_table[idx].va != va) {
+    // Skip deleted entries (tombstones) but stop at truly free (never-used) entries
+    while (!pact_page_table[idx].free) {
+        if (!pact_page_table[idx].deleted && pact_page_table[idx].va == va) {
+            return &pact_page_table[idx];   // DOES NOT UNLOCK PAGE, caller is responsible for unlocking
+        }
         pthread_mutex_unlock(&pact_page_table[idx].page_lock);
         idx = (idx + 1) % MAX_PAGES;
+        if (idx == start_idx) { // Checked all entries, va not found
+            return NULL;
+        }
         pthread_mutex_lock(&pact_page_table[idx].page_lock);
-    }
-    if (!pact_page_table[idx].free && pact_page_table[idx].va == va) {
-        return &pact_page_table[idx];   // DOES NOT UNLOCK PAGE, caller is responsible for unlocking
     }
     pthread_mutex_unlock(&pact_page_table[idx].page_lock);
     return NULL;
 
 }
 
-void add_page(uint64_t va, uint8_t in_fast) {
+void add_page(uint64_t va, uint8_t in_fast, uint64_t size) {
     uint64_t idx = PAGE_LOOKUP(va);
+    uint64_t start_idx = idx;
+    if (num_pages > MAX_PAGES) {
+        fprintf(stderr, "Error: Exceeded maximum number of pages, can't add page: 0x%lx\n", va);
+        abort();
+    }
 
     pthread_mutex_lock(&pact_page_table[idx].page_lock);
 
-    // Find free page in table
-    while (!pact_page_table[idx].free) {
-        LOG_DEBUG("add_page: duplicate page: 0x%lx\n", va);
+    // Find free or deleted page in table (prefer reusing deleted slots)
+    while (!pact_page_table[idx].free && !pact_page_table[idx].deleted) {
+        // LOG_DEBUG("add_page: duplicate page: 0x%lx\n", va);
         pthread_mutex_unlock(&pact_page_table[idx].page_lock);
         idx = (idx + 1) % MAX_PAGES;
+        if (idx == start_idx) { // Checked all entries, no free/deleted entry found
+            fprintf(stderr, "Error: pact_page_table full, can't add page: 0x%lx\n", va);
+            abort();
+        }
         pthread_mutex_lock(&pact_page_table[idx].page_lock);
     }
 
     // Initialize page
+    pact_page_table[idx].size = size;
     pact_page_table[idx].va = va;
 #if PAGR_ALGO == 1
     pact_page_table[idx].cyc = 0;
@@ -83,6 +99,7 @@ void add_page(uint64_t va, uint8_t in_fast) {
 
     pact_page_table[idx].in_fast = in_fast;
     pact_page_table[idx].free = false;
+    pact_page_table[idx].deleted = false;  // Clear tombstone flag
 
     pact_page_table[idx].pagr_pred = 0;
     pact_page_table[idx].hem_pred = 0;
@@ -92,7 +109,11 @@ void add_page(uint64_t va, uint8_t in_fast) {
     pact_page_table[idx].real_accessed = 0;
 
     pthread_mutex_unlock(&pact_page_table[idx].page_lock);
-    LOG_DEBUG("Added page: 0x%lx, in_fast: %d\n", va, in_fast);
+    // LOG_DEBUG("Added page: 0x%lx, in_fast: %d\n", va, in_fast);
+    num_pages++;
+    if (num_pages % 1000 == 0) {
+        LOG_DEBUG("num_pages: %lu\n", num_pages);
+    }
 }
 
 struct pact_page* find_page_no_lock(uint64_t va) {
@@ -101,13 +122,14 @@ struct pact_page* find_page_no_lock(uint64_t va) {
 
     while (true) {
         if (pact_page_table[idx].free) {
-            return NULL;
+            return NULL;  // Stop at truly free (never-used) entries
         }
-        if (pact_page_table[idx].va == va) {
+        // Skip deleted (tombstone) entries but check active entries
+        if (!pact_page_table[idx].deleted && pact_page_table[idx].va == va) {
             if (pthread_mutex_trylock(&pact_page_table[idx].page_lock) != 0) {
                 return NULL;    // Abort early so no waiting
             }
-            if (pact_page_table[idx].free || pact_page_table[idx].va != va) {
+            if (pact_page_table[idx].free || pact_page_table[idx].deleted || pact_page_table[idx].va != va) {
                 pthread_mutex_unlock(&pact_page_table[idx].page_lock);
                 return NULL;
             }
@@ -132,13 +154,16 @@ void pact_init() {
     // the set FAST capacity
     numa_set_preferred(FAST_NODE);
 
-    LOG_DEBUG("pact_page_table size: %lu\n", sizeof(pact_page_table));
+    pact_page_table = (struct pact_page*)libc_mmap(NULL, sizeof(struct pact_page) * MAX_PAGES, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+
+    LOG_DEBUG("pact_page_table size: %lu\n", sizeof(struct pact_page) * MAX_PAGES);
     LOG_DEBUG("pact_page size: %lu\n", sizeof(struct pact_page));
-    LOG_DEBUG("pact_page_table num pages: %lu\n", sizeof(pact_page_table) / sizeof(struct pact_page));
+    LOG_DEBUG("pact_page_table num pages: %lu\n", MAX_PAGES);
 
     // Initialize all locks and all pages as free
-    for (uint64_t i = 0; i < RAM_SIZE / PAGE_SIZE; i++) {
+    for (uint64_t i = 0; i < MAX_PAGES; i++) {
         pact_page_table[i].free = true;
+        pact_page_table[i].deleted = false;
         pthread_mutex_init(&pact_page_table[i].page_lock, NULL);
     }
 
@@ -247,13 +272,18 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
     /* End of User program Memory allocation */
     /* Add pages to pact_page_table */
 
-    assert(length >= PAGE_SIZE);
+    // assert(length >= PAGE_SIZE);
 
     // Split allocation into PAGE_SIZE chunks and add to pact_page_table
     for (uint64_t i = 0; i < length; i += PAGE_SIZE) {
         uint64_t va = (uint64_t)p + i;
         uint8_t in_fast = (va >= (uint64_t)p_slow) ? IN_SLOW : IN_FAST;
-        add_page(va, in_fast);
+        add_page(va, in_fast, PAGE_SIZE);
+    }
+    if (length % PAGE_SIZE != 0) {
+        uint64_t va = (uint64_t)p + (length - (length % PAGE_SIZE));
+        uint8_t in_fast = (va >= (uint64_t)p_slow) ? IN_SLOW : IN_FAST;
+        add_page(va, in_fast, length % PAGE_SIZE);
     }
 
 
@@ -269,24 +299,25 @@ int pact_munmap(void *addr, size_t length) {
     uint64_t num_pact_pages = (length + PAGE_SIZE - 1) / PAGE_SIZE;
     for (uint64_t i = 0; i < num_pact_pages; i++) {
         void *va_start = addr + (i * PAGE_SIZE);
-        uint64_t va;
-        if (length - (i * PAGE_SIZE) < PAGE_SIZE) {
-            va = (uint64_t)(va_start);
-        } else {
-            va = PAGE_ROUND_UP((uint64_t)(va_start));
-        }
+        uint64_t va = (uint64_t)va_start;
+        // if (length - (i * PAGE_SIZE) < PAGE_SIZE) {
+        //     va = (uint64_t)(va_start);
+        // } else {
+        //     va = PAGE_ROUND_UP((uint64_t)(va_start));
+        // }
         struct pact_page *page = find_page(va);
         if (page != NULL) {
             assert(page->free == false);
-            page->free = true;
+            page->deleted = true;  // Mark as tombstone (lazy deletion)
 
-            pebs_stats.mem_allocated -= PAGE_SIZE;
+            pebs_stats.mem_allocated -= page->size;
 
             if (page->list != NULL) {
                 page_list_remove_page(page->list, page);
             }
 
             pthread_mutex_unlock(&page->page_lock);
+            num_pages--;
         }
     }
     internal_call = false;

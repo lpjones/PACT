@@ -620,7 +620,7 @@ static uint64_t last_cyc = 0;
 
 void pact_migrate_page(struct pact_page *page, int node) {
     unsigned long nodemask = 1UL << node;
-    if (mbind((void *)page->va, PAGE_SIZE, MPOL_BIND, &nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
+    if (mbind((void *)page->va, page->size, MPOL_BIND, &nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
         perror("mbind");
         // LOG_DEBUG("mbind failed %p\n", page->va_start);
         pebs_stats.mig_failed++;
@@ -754,7 +754,7 @@ void *demote_thread() {
             fwrite(&p_rec, sizeof(struct pebs_rec), 1, demote_pred_fp);
 #endif
             pact_migrate_page(cold_page, SLOW_NODE);
-            bytes_demoted += PAGE_SIZE;
+            bytes_demoted += cold_page->size;
             // LOG_DEBUG("MIG: demoted 0x%lx\n", cold_page->va);
             pthread_mutex_unlock(&cold_page->page_lock);
         }

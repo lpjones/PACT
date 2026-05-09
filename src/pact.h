@@ -65,9 +65,9 @@ struct neighbor_page {
     uint64_t time_diff;
 };
 
-struct __attribute__((aligned(64))) pact_page {
+struct pact_page {
     pthread_mutex_t page_lock;
-
+    uint64_t size;
     uint64_t va;
 #if PAGR_ALGO == 1
     uint64_t cyc;
@@ -92,7 +92,8 @@ struct __attribute__((aligned(64))) pact_page {
 
     // Page states
     _Atomic uint8_t in_fast;
-    _Atomic bool free;
+    unsigned int free : 1;  // Flag for free pages
+    unsigned int deleted : 1;  // Tombstone for lazy deletion in hash table
     // Prediction states
     unsigned int pagr_pred : 1;
     unsigned int hem_pred : 1;

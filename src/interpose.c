@@ -42,11 +42,11 @@ static int mmap_filter(void *addr, size_t length, int prot, int flags, int fd, o
       return 1;
     }
 
-    if (length < PAGE_SIZE) {
-      LOG_DEBUG("MMAP: allocation too small: mmap(%p, %lu, %d, %d, %d, %lu)\n", addr, length, prot, flags, fd, offset);
-      return 1;
-    }
-
+    // if (length < PAGE_SIZE) {
+    //   LOG_DEBUG("MMAP: allocation too small: mmap(%p, %lu, %d, %d, %d, %lu)\n", addr, length, prot, flags, fd, offset);
+    //   return 1;
+    // }
+    // LOG_DEBUG("MMAP: pact_mmap(%p, %lu, %d, %d, %d, %lu)\n", addr, length, prot, flags, fd, offset);
     *result = (uint64_t)pact_mmap(addr, length, prot, flags, fd, offset);
     if (*result == (uint64_t)MAP_FAILED) {
       LOG_DEBUG("pact mmap failed for %p, length: %lu\n", addr, length);
@@ -65,9 +65,10 @@ static int munmap_filter(void *addr, size_t length, uint64_t* result)
       return 1;
     }
 
-//   if ((*result = hemem_munmap(addr, length)) == -1) {
-//     LOG("hemem munmap failed\n\tmunmap(0x%lx, %ld)\n", (uint64_t)addr, length);
-//   }
+    // if (length < PAGE_SIZE) {
+    //   LOG_DEBUG("MUNMAP: unmapping too small: munmap(%p, %lu)\n", addr, length);
+    //   return 1;
+    // }
 // printf("Get hooked fool\n");
     LOG_DEBUG("MUNMAP: pact_munmap(%p, %lu)\n", addr, length);
 

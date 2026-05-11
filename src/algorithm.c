@@ -22,7 +22,7 @@ double mig_move_time = 0;
 #define CLIP(x, a, b) (MIN(MAX((x), (a)), (b)))
 
 #ifndef VA_WEIGHT
-#define VA_WEIGHT 0
+#define VA_WEIGHT 1
 #endif
 
 #ifndef CYC_WEIGHT
@@ -30,7 +30,7 @@ double mig_move_time = 0;
 #endif
 
 #ifndef IP_WEIGHT
-#define IP_WEIGHT 0
+#define IP_WEIGHT 1
 #endif
 
 #ifndef DEC_FAST

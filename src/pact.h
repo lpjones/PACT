@@ -26,6 +26,16 @@
 #define PAGE_MASK (~(PAGE_SIZE - 1))
 #define BASE_PAGE_MASK (~(BASE_PAGE_SIZE - 1))
 
+// Watermark thresholds (in bytes) - based on MEMTIS strategy
+#define MIN_WATERMARK_LOWER_LIMIT   (128 * 100 * BASE_PAGE_SIZE)  // ~50MB
+#define MIN_WATERMARK_UPPER_LIMIT   (2560 * 100 * BASE_PAGE_SIZE) // ~1000MB
+#define MAX_WATERMARK_LOWER_LIMIT   (256 * 100 * BASE_PAGE_SIZE)  // ~100MB
+#define MAX_WATERMARK_UPPER_LIMIT   (3840 * 100 * BASE_PAGE_SIZE) // ~1500MB
+
+// Watermark percentages
+#define DEMOTION_WATERMARK_PERCENT  2    // 2% for demotion threshold
+#define PROMOTION_WATERMARK_PERCENT 3    // 3% for promotion threshold
+
 // Use either FAST_BUFFER or FAST_SIZE
 #ifndef FAST_BUFFER 
 #define FAST_BUFFER (1 * 1024L * 1024L * 1024L)     // How much to leave available on FAST node
@@ -45,6 +55,8 @@ extern long fast_free;
 extern long fast_size;
 extern long fast_used;
 extern long slow_used;
+extern long demotion_watermark;
+extern long promotion_watermark;
 extern pthread_mutex_t mmap_lock;
 extern _Atomic bool fast_lock;
 
@@ -104,6 +116,11 @@ struct pact_page {
     unsigned int real_pred : 1;
     unsigned int real_accessed : 1;
 };
+
+// Watermark calculation functions (inspired by MEMTIS strategy)
+long pact_get_demotion_watermark(long max_bytes);
+long pact_get_promotion_watermark(long max_bytes);
+void pact_update_watermarks(void);
 
 void pact_init();
 void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);

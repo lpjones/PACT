@@ -11,61 +11,11 @@ long fast_free = 0;
 long fast_size = 0;
 long fast_used = 0;
 long slow_used = 0;
-long demotion_watermark = 0;  // Watermark to trigger demotion (2% of fast_size)
-long promotion_watermark = 0; // Watermark to allow more promotions (3% of fast_size)
 
 static uint64_t max_pact_va = 0;
 static uint64_t min_pact_va = UINT64_MAX;
 
 _Atomic bool fast_lock = false;
-
-/**
- * Calculate demotion watermark (2% of capacity with bounds)
- * Inspired by MEMTIS: get_memcg_demotion_watermark()
- * Returns: watermark in bytes, between MIN_WATERMARK_LOWER_LIMIT and MIN_WATERMARK_UPPER_LIMIT
- */
-long pact_get_demotion_watermark(long max_bytes)
-{
-    long watermark = max_bytes * DEMOTION_WATERMARK_PERCENT / 100;
-    
-    if (watermark < MIN_WATERMARK_LOWER_LIMIT)
-        return MIN_WATERMARK_LOWER_LIMIT;
-    else if (watermark > MIN_WATERMARK_UPPER_LIMIT)
-        return MIN_WATERMARK_UPPER_LIMIT;
-    else
-        return watermark;
-}
-
-/**
- * Calculate promotion watermark (3% of capacity with bounds)
- * Inspired by MEMTIS: get_memcg_promotion_watermark()
- * Returns: watermark in bytes, between MAX_WATERMARK_LOWER_LIMIT and MAX_WATERMARK_UPPER_LIMIT
- */
-long pact_get_promotion_watermark(long max_bytes)
-{
-    long watermark = max_bytes * PROMOTION_WATERMARK_PERCENT / 100;
-    
-    if (watermark < MAX_WATERMARK_LOWER_LIMIT)
-        return MAX_WATERMARK_LOWER_LIMIT;
-    else if (watermark > MAX_WATERMARK_UPPER_LIMIT)
-        return MAX_WATERMARK_UPPER_LIMIT;
-    else
-        return watermark;
-}
-
-/**
- * Update watermark thresholds based on current fast_size
- * Called during initialization and whenever fast_size changes
- */
-void pact_update_watermarks(void)
-{
-    demotion_watermark = pact_get_demotion_watermark(fast_size);
-    promotion_watermark = pact_get_promotion_watermark(fast_size);
-    
-    LOG_DEBUG("Updated watermarks: demotion=%ld bytes (%.1f%%), promotion=%ld bytes (%.1f%%)\n",
-             demotion_watermark, (demotion_watermark * 100.0) / fast_size,
-             promotion_watermark, (promotion_watermark * 100.0) / fast_size);
-}
 
 // If the allocations are smaller than the PAGE_SIZE it's possible to 
 void add_page(struct pact_page *page) {
@@ -131,8 +81,6 @@ void pact_init() {
     LOG_DEBUG("pact_page size: %lu\n", sizeof(struct pact_page));
 
     LOG_DEBUG("finished pact_init\n");
-    LOG_DEBUG("Watermark Configuration: demotion=%ld bytes, promotion=%ld bytes\n",
-             demotion_watermark, promotion_watermark);
 
     struct pact_page *dummy_page = calloc(1, sizeof(struct pact_page));
     add_page(dummy_page);
@@ -145,10 +93,6 @@ void pact_init() {
 #if FAST_SIZE != 0
     fast_size = FAST_SIZE;
 #endif
-    
-    // Calculate watermark thresholds based on fast_size
-    pact_update_watermarks();
-    
     internal_call = false;
 }
 
@@ -173,28 +117,13 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
 
     pthread_mutex_lock(&mmap_lock);
     LOG_DEBUG("fast_used: %lu, length: %lu, fast_size: %lu, fast_lock %d\n", __atomic_load_n(&fast_used, __ATOMIC_ACQUIRE), length, fast_size, atomic_load_explicit(&fast_lock, memory_order_acquire));
-    
-    // Calculate available space accounting for promotion watermark
-    long fast_available = fast_size - promotion_watermark;
-    long fast_current = __atomic_load_n(&fast_used, __ATOMIC_ACQUIRE);
-    bool is_fast_full = fast_current + length > fast_available;
-    
-    // Check if we should trigger demotion (fast memory usage above demotion threshold)
-    long demotion_threshold = fast_size - demotion_watermark;
-    bool should_demote = fast_current > demotion_threshold;
-    
-    if (should_demote && !atomic_load_explicit(&fast_lock, memory_order_acquire)) {
-        atomic_store_explicit(&fast_lock, true, memory_order_release);
-        LOG_DEBUG("MMAP: Demotion triggered - fast_used (%lu) > threshold (%lu)\n", fast_current, demotion_threshold);
-    }
-    
-    if (fast_current + length <= fast_available 
+    if (__atomic_load_n(&fast_used, __ATOMIC_ACQUIRE) + length <= fast_size 
         && atomic_load_explicit(&fast_lock, memory_order_acquire) == false) {
         // can allocate all on fast
         __atomic_fetch_add(&fast_used, length, __ATOMIC_RELEASE);
         // fast_used += length;
         pthread_mutex_unlock(&mmap_lock);
-        LOG_DEBUG("MMAP: All FAST (used: %lu, avail: %lu)\n", fast_current + length, fast_available);
+        LOG_DEBUG("MMAP: All FAST\n");
 
 
         if (mbind(p, length, MPOL_PREFERRED, &fast_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT)) {
@@ -204,18 +133,18 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         
         p_fast = p;
         p_slow = p_fast + length + 1;    // Used later to check which node page is in
-    } else if (fast_current + PAGE_SIZE > fast_available || atomic_load_explicit(&fast_lock, memory_order_acquire)) {
+    } else if (fast_used + PAGE_SIZE > fast_size || atomic_load_explicit(&fast_lock, memory_order_acquire)) {
         pthread_mutex_unlock(&mmap_lock);
-        LOG_DEBUG("MMAP: All Remote (used: %lu, avail: %lu, fast_lock: %d)\n", fast_current, fast_available, atomic_load_explicit(&fast_lock, memory_order_acquire));
-        // fast nearly full or demotion in progress, all on slow
+        LOG_DEBUG("MMAP: All Remote\n");
+        // fast full, all on slow
         if (mbind(p, length, MPOL_PREFERRED, &slow_nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT)) {
             perror("mbind");
             assert(0);
         }
         p_slow = p;
     } else {
-        // split between fast and slow - allocate up to promotion watermark
-        uint64_t fast_mmap_size = PAGE_ROUND_DOWN(fast_available - fast_current);
+        // split between fast and slow
+        uint64_t fast_mmap_size = PAGE_ROUND_DOWN(fast_size - fast_used);
         // fast_used += fast_mmap_size;
         __atomic_fetch_add(&fast_used, fast_mmap_size, __ATOMIC_RELEASE);
         pthread_mutex_unlock(&mmap_lock);

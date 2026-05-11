@@ -200,7 +200,6 @@ static void start_pebs_stats_thread() {
 
 // Could be munmapped at any time
 void make_hot_request(struct pact_page* page) {
-
     if (page == NULL) return;
     // page could be munmapped here (but pages are never actually
     // unmapped so just check if it's in free state once locked)
@@ -210,6 +209,7 @@ void make_hot_request(struct pact_page* page) {
     // pthread_mutex_lock(&page->page_lock);
     // check if unmapped
     if (page->free) {
+        // printf("Page was free\n");
         pthread_mutex_unlock(&page->page_lock);
         return;
     }
@@ -581,7 +581,7 @@ void* pebs_scan_thread() {
 
                     // // Try 4KB aligned page if not 2MB aligned page
                     // if (next_page != NULL) {
-                    //     // LOG_DEBUG("Found sequential page: 0x%lx\n", next_page->va);
+                    //     LOG_DEBUG("Found sequential page: 0x%lx\n", next_page->va);
                     //     make_hot_request(next_page);
                     // } else {
                     //     LOG_DEBUG("No sequential page found for address: 0x%lx\n", addr_aligned + PAGE_SIZE);
@@ -595,6 +595,7 @@ void* pebs_scan_thread() {
                     LOG_END_PEBS(SAMPLE_WHOLE);
                 } while (cond);
 
+                no_samples[cpu_idx][evt]++;
                 uint64_t cur_cyc = rdtscp();
                 if (cur_cyc > no_samples[cpu_idx][evt] + NO_SAMPLE_RESET_TIME * (pact_sample_period_idx + 1)) {
                     pebs_stats.pebs_resets++;
@@ -620,7 +621,6 @@ void* pebs_scan_thread() {
 static uint64_t last_cyc = 0;
 
 void pact_migrate_page(struct pact_page *page, int node) {
-    // LOG_DEBUG("Migrating page 0x%lx to node %d\n", page->va, node);
     unsigned long nodemask = 1UL << node;
     if (mbind(page->va_start, page->size, MPOL_BIND, &nodemask, 64, MPOL_MF_MOVE | MPOL_MF_STRICT) == -1) {
         perror("mbind");

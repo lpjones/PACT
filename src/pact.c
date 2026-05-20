@@ -17,6 +17,207 @@ static uint64_t min_pact_va = UINT64_MAX;
 
 _Atomic bool fast_lock = false;
 
+/**
+ * Calculate skewness index for a page (inspired by MEMTIS)
+ * Skewness measures how non-uniform the access pattern is
+ * Returns: skewness value (higher = more skewed access pattern)
+ */
+double pact_calculate_skewness(struct pact_page *page)
+{
+    if (page->access_count == 0) {
+        return 0.0;  // No accesses yet
+    }
+    
+    // Calculate variance: E[X^2] - (E[X])^2
+    double mean = (double)page->accesses / page->access_count;
+    double mean_sq = (double)page->access_sum_sq / page->access_count;
+    double variance = mean_sq - (mean * mean);
+    
+    if (variance <= 0.0) {
+        return 0.0;  // Uniform access
+    }
+    
+    // Coefficient of variation (CV) as skewness measure
+    double cv = sqrt(variance) / mean;
+    
+    // Scale down similar to MEMTIS (divide by 11)
+    double skewness = cv / SKEWNESS_SCALE_FACTOR;
+    
+    // Clamp to reasonable range
+    if (skewness > 20.0) skewness = 20.0;
+    if (skewness < 0.0) skewness = 0.0;
+    
+    return skewness;
+}
+
+/**
+ * Update skewness tracking for a page after an access
+ */
+void pact_update_skewness(struct pact_page *page)
+{
+    // Update running statistics for variance calculation
+    page->access_count++;
+    page->access_sum_sq += (page->accesses * page->accesses);
+    
+    // Recalculate skewness periodically (every 100 accesses) or on first access
+    if (page->access_count == 1 || page->access_count % 100 == 0) {
+        page->skewness = pact_calculate_skewness(page);
+    }
+}
+
+/**
+ * Get promotion threshold adjustment based on skewness
+ * Higher skewness = more selective promotion (higher threshold)
+ * Lower skewness = more aggressive promotion (lower threshold)
+ */
+double pact_get_skewness_threshold_adjustment(double skewness)
+{
+    // Very skewed pages (high skewness) need higher threshold to be promoted
+    // Uniform pages (low skewness) can be promoted more easily
+    if (skewness >= SKEWNESS_THRESHOLD_HIGH) {
+        return 1.5;  // 50% higher threshold for very hot/skewed pages
+    } else if (skewness <= SKEWNESS_THRESHOLD_LOW) {
+        return 0.8;  // 20% lower threshold for uniform access
+    } else {
+        // Linear interpolation between thresholds
+        double range = SKEWNESS_THRESHOLD_HIGH - SKEWNESS_THRESHOLD_LOW;
+        double factor = (skewness - SKEWNESS_THRESHOLD_LOW) / range;
+        return 0.8 + (factor * 0.7);  // 0.8 to 1.5 range
+    }
+}
+
+/**
+ * Initialize subpage tracking for a page
+ */
+void pact_init_subpages(struct pact_page *page)
+{
+    if (page->subpage_accesses != NULL) {
+        return; // Already initialized
+    }
+
+    page->subpage_accesses = calloc(SUBPAGES_PER_PAGE, sizeof(uint64_t));
+    page->subpage_hot = calloc(SUBPAGES_PER_PAGE, sizeof(bool));
+    page->num_hot_subpages = 0;
+    page->is_split = false;
+
+    if (!page->subpage_accesses || !page->subpage_hot) {
+        LOG_DEBUG("Failed to allocate subpage tracking arrays\n");
+        exit(1);
+    }
+}
+
+/**
+ * Update access count for a specific subpage within a page
+ */
+void pact_update_subpage_access(struct pact_page *page, uint64_t offset)
+{
+    if (!page->is_split && page->subpage_accesses == NULL) {
+        pact_init_subpages(page);
+    }
+
+    if (page->subpage_accesses == NULL) {
+        return; // Not tracking subpages
+    }
+
+    // Calculate which subpage this offset belongs to
+    uint32_t subpage_idx = (offset / SUBPAGE_SIZE) % SUBPAGES_PER_PAGE;
+    
+    if (subpage_idx >= SUBPAGES_PER_PAGE) {
+        LOG_DEBUG("Subpage index %u out of bounds for page at 0x%lx\n", 
+                 subpage_idx, page->va);
+        return;
+    }
+
+    page->subpage_accesses[subpage_idx]++;
+
+    // Mark as hot if access count exceeds threshold
+    uint64_t hot_threshold = page->accesses / SUBPAGES_PER_PAGE; // Average access rate
+    if (page->subpage_accesses[subpage_idx] > hot_threshold && !page->subpage_hot[subpage_idx]) {
+        page->subpage_hot[subpage_idx] = true;
+        page->num_hot_subpages++;
+    }
+}
+
+/**
+ * Determine if a page should be split based on skewness and access patterns
+ */
+bool pact_should_split_page(struct pact_page *page)
+{
+    if (page->is_split) {
+        return false; // Already split
+    }
+
+    if (page->subpage_accesses == NULL) {
+        return false; // No subpage tracking
+    }
+
+    // Check skewness threshold
+    if (page->skewness < SKEWNESS_SPLIT_THRESHOLD) {
+        return false; // Not skewed enough
+    }
+
+    // Check minimum number of hot subpages
+    if (page->num_hot_subpages < MIN_HOT_SUBPAGES_FOR_SPLIT) {
+        return false; // Not enough hot subpages
+    }
+
+    // Check if hot subpages are concentrated (not uniform)
+    uint32_t total_subpages = SUBPAGES_PER_PAGE;
+    uint32_t expected_hot = total_subpages / 4; // Expect 25% hot subpages for uniform
+    
+    if (page->num_hot_subpages <= expected_hot * 2) {
+        return false; // Reasonably uniform distribution
+    }
+
+    return true;
+}
+
+/**
+ * Split a page into subpages for individual migration
+ */
+void pact_split_page(struct pact_page *page)
+{
+    if (page->is_split) {
+        return; // Already split
+    }
+
+    if (page->subpage_accesses == NULL) {
+        pact_init_subpages(page);
+    }
+
+    page->is_split = true;
+    LOG_DEBUG("Split page 0x%lx into %d subpages (%d hot)\n", 
+             page->va, SUBPAGES_PER_PAGE, page->num_hot_subpages);
+}
+
+/**
+ * Clean up subpage tracking arrays
+ */
+void pact_cleanup_subpages(struct pact_page *page)
+{
+    if (page->subpage_accesses) {
+        free(page->subpage_accesses);
+        page->subpage_accesses = NULL;
+    }
+    if (page->subpage_hot) {
+        free(page->subpage_hot);
+        page->subpage_hot = NULL;
+    }
+    page->num_hot_subpages = 0;
+    page->is_split = false;
+}
+
+/**
+ * Get the count of hot subpages in a page
+ */
+uint32_t pact_get_hot_subpage_count(struct pact_page *page)
+{
+    if (page->subpage_accesses == NULL) {
+        return 0;
+    }
+    return page->num_hot_subpages;
+}
+
 // If the allocations are smaller than the PAGE_SIZE it's possible to 
 void add_page(struct pact_page *page) {
     struct pact_page *p;
@@ -93,6 +294,7 @@ void pact_init() {
 #if FAST_SIZE != 0
     fast_size = FAST_SIZE;
 #endif
+    
     internal_call = false;
 }
 
@@ -216,6 +418,17 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         page->cyc = 0;
         page->ip = 0;
 #endif
+        
+        // Initialize skewness tracking
+        page->skewness = 0.0;
+        page->access_sum_sq = 0;
+        page->access_count = 0;
+
+        // Initialize subpage tracking
+        page->is_split = false;
+        page->subpage_accesses = NULL;
+        page->subpage_hot = NULL;
+        page->num_hot_subpages = 0;
 
         // page->prev = NULL;
         // page->next = NULL;
@@ -276,6 +489,17 @@ void* pact_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
         page->cyc = 0;
         page->ip = 0;
 #endif
+        
+        // Initialize skewness tracking
+        page->skewness = 0.0;
+        page->access_sum_sq = 0;
+        page->access_count = 0;
+
+        // Initialize subpage tracking
+        page->is_split = false;
+        page->subpage_accesses = NULL;
+        page->subpage_hot = NULL;
+        page->num_hot_subpages = 0;
 
         page->prev = NULL;
         page->next = NULL;
@@ -329,6 +553,10 @@ int pact_munmap(void *addr, size_t length) {
             if (page->list != NULL) {
                 page_list_remove_page(page->list, page);
             }
+            
+            // Clean up subpage tracking
+            pact_cleanup_subpages(page);
+            
             enqueue_fifo(&free_list, page);
 
             pthread_mutex_unlock(&page->page_lock);

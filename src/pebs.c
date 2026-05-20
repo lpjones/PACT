@@ -218,6 +218,13 @@ void make_hot_request(struct pact_page* page) {
     // add to hot list if:
     // page is not already in hot list and in slow mem
     if (page->list != &hot_list && page->in_fast == IN_SLOW) {
+        
+        // Check if page should be split based on skewness
+        if (!page->is_split && pact_should_split_page(page)) {
+            pact_split_page(page);
+            LOG_DEBUG("Split page 0x%lx due to high skewness %.2f\n", page->va, page->skewness);
+        }
+        
         // page should not be hot
         // not be cold since all cold pages are in fast
         // not be free 
@@ -520,6 +527,14 @@ void* pebs_scan_thread() {
                     page->local_clock = global_clock;
 
                     page->accesses++;
+                    
+                    // Update skewness tracking
+                    pact_update_skewness(page);
+                    
+                    // Update subpage access tracking
+                    uint64_t page_offset = rec.addr - page->va;
+                    pact_update_subpage_access(page, page_offset);
+                    
                     if (page->accesses >= HOT_THRESHOLD) {
                         page->hem_accessed = false;
                         page->hem_pred = true;

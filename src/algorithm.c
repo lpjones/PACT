@@ -1,4 +1,5 @@
 #include "algorithm.h"
+#include "pact.h"
 #include <float.h>
 
 double mig_queue_time = 0;
@@ -249,8 +250,21 @@ void algo_predict_pages(struct pact_page *page, struct pact_page **pred_pages, u
 #endif
 
 #if DFS_ALGO == 1
-    // DFS
-    double threshold = bot_dist;
+    // DFS with skewness-adjusted threshold
+    double base_threshold = bot_dist;
+    double skewness_adjustment = pact_get_skewness_threshold_adjustment(page->skewness);
+    
+    // For split pages, use more aggressive promotion (lower threshold) since
+    // only hot subpages are likely to be accessed
+    if (page->is_split) {
+        skewness_adjustment *= 0.7;  // 30% more aggressive for split pages
+    }
+    
+    double threshold = base_threshold * skewness_adjustment;
+    
+    // LOG_DEBUG("Skewness-adjusted threshold: base=%.2e, skew=%.2f, adj=%.2f, split=%d, final=%.2e\n", 
+    //          base_threshold, page->skewness, skewness_adjustment, page->is_split, threshold);
+    
     uint64_t tot_time_diff = 0;
     struct pact_page *cur_page = page;
     for (uint32_t d = 0; d < MAX_PRED_DEPTH; d++) {
